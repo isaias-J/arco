@@ -21,7 +21,7 @@ escribir) y lo muestra. Opciones:
 |---|---|
 | **Combinar (recomendado)** | Añade lo que falta. Adopta los cambios de la copia que se pueden ordenar con los datos guardados. En un conflicto real conserva lo de este iPhone. No borra nada. |
 | **Combinar; en conflictos, usar la copia** | Igual, pero en los conflictos aplica la copia. No borra nada. |
-| **Reemplazar con la copia** | Deja entrenamientos, medidas, asistencia, catálogo, perfil y rutina como en la copia y elimina lo que la copia no tiene. Pide una segunda confirmación que enumera lo que se eliminará. **Nunca borra fotos.** |
+| **Reemplazar con la copia** | Deja entrenamientos, medidas, asistencia, perfil y rutina como en la copia y elimina lo que la copia no tiene, incluidos borradores. Pide una segunda confirmación que enumera lo que se eliminará. **Nunca borra fotos ni ejercicios del catálogo** (los que la copia no tiene se nombran; ver `11-TERCERA-REVISION.md`). |
 
 Reglas (iguales en la previsión y en la restauración real):
 
@@ -39,7 +39,7 @@ Reglas (iguales en la previsión y en la restauración real):
 | Serie: omitida en un lado y borrador en el otro | Gana la omitida (solo se omite desde un borrador). |
 | Serie: mismas horas con distinto estado (p. ej. deshacer confirmación) o realizada en ambos con valores distintos (edición) | Conflicto: los datos no permiten saber cuál es posterior. |
 | Serie eliminada aquí (borrado lógico) y realizada en la copia | Conflicto: al combinar conservando este iPhone sigue eliminada. |
-| Sesión abierta aquí y cerrada en la copia | Se adopta el cierre (en Arco cerrar es definitivo) y se descartan los borradores locales que la copia no tiene, igual que al finalizar. |
+| Sesión abierta aquí y cerrada en la copia | Sin borradores locales que la copia no tenga: se adopta el cierre (en Arco cerrar es definitivo). Con borradores locales: al combinar la sesión queda abierta y los borradores se conservan (conflicto explicado); solo "Reemplazar" los elimina, y lo anuncia. (Cambiado en la tercera revisión.) |
 | Sesión cerrada aquí y abierta en la copia | Se conserva lo de aquí. |
 | Fecha u hora de la sesión distintas | Conflicto. |
 | Ejercicio de sesión sustituido por otro distinto en cada lado | Conflicto. Las series realizadas nunca se reasignan a otro ejercicio: con series hechas aquí no se aplica la copia salvo al reemplazar. |

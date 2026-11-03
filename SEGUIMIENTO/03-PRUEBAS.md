@@ -1,6 +1,6 @@
 # Arco — Matriz de requisitos y criterios de aceptación
 
-Actualizada: 2026-11-03, tras la segunda revisión independiente (`10-SEGUNDA-REVISION.md`).
+Actualizada: 2026-11-03, tras la tercera revisión independiente (`11-TERCERA-REVISION.md`).
 
 **Estados:** *no implementado* · *implementado sin probar* · *probado con datos simulados*
 (pruebas automáticas de ArcoCore con SwiftData real en memoria o en disco temporal) ·
@@ -9,7 +9,7 @@ Actualizada: 2026-11-03, tras la segunda revisión independiente (`10-SEGUNDA-RE
 Ningún criterio está **probado en iPhone real** todavía. Lista para el iPhone: `09-VERIFICACION-IPHONE.md`.
 
 **Evidencia ejecutada**
-- `cd ArcoCore && swift test` → 123 pruebas, 19 suites, en verde (antes de los cambios: 97; las 2 pruebas independientes fallaban).
+- `cd ArcoCore && swift test` → 126 pruebas, 20 suites, en verde (las 2 pruebas de la tercera revisión fallaban antes de corregir; se adaptaron a la política final).
 - `xcodebuild -scheme Arco -destination 'id=<simulador temporal>' test` → 19 recorridos de interfaz
   en verde en una sola corrida con la firma habitual del simulador (7 `ArcoFlowTests`,
   7 `ArcoStageFlowTests`, 5 `ArcoReviewFlowTests`). Con `CODE_SIGNING_ALLOWED=NO`, `testVaultPIN` falla.
@@ -87,8 +87,10 @@ Ningún criterio está **probado en iPhone real** todavía. Lista para el iPhone
 | §9 Fuentes y método | probado en simulador | E01–E07 con alcance y fecha de revisión | `EvidenceLibraryTests`, UI `testEvidenceAndSummary` | abrir enlaces (requiere red) |
 | Restauración sobre datos existentes: catálogo | probado con datos simulados | campo a campo frente a valores de fábrica; conflictos explícitos | `IndependentRestoreAuditTests`, `cleanInstallRestoresCatalogEdits`, `catalogConflict`, `catalogLocalChangeKept`, `catalogNameClash` | — |
 | Restauración sobre datos existentes: sesiones y series | probado con datos simulados | combinación por sesión, ejercicio y serie; previsión antes de restaurar | `IndependentRestoreAuditTests`, `olderThenNewerAndReverse`, `editedSetConflict`, `addedSetsBothSides`, `archiveFinishedSession`, `draftsNotAddedToClosedSession`, `deletionsAndReplace`, `attendanceNotDuplicated`, `previewMatchesRestore` | restauración real con fotos: iPhone |
-| Reemplazar con la copia | probado en simulador | segunda confirmación; nunca borra fotos | `deletionsAndReplace`, `replaceKeepsPhotos`, UI `testExportAndRestoreReport` | — |
+| Reemplazar con la copia | probado en simulador | segunda confirmación; nunca borra fotos ni ejercicios del catálogo, y nombra los que conserva | `deletionsAndReplace`, `replaceKeepsPhotos`, UI `testExportAndRestoreReport` | — |
 | Copias anteriores (fechas en segundos, sin campos v3) | probado con datos simulados | decodificador acepta ambos formatos | `legacyFormatCompatibility`, `migrationFromV1`, `migrationV2toV3` | — |
 | §12 Series por músculo en el tiempo | probado en simulador | semanas/meses/años, D/I/F, incompletos, "sin registros" ≠ 0 | `ProgressHistoryTests`, UI `testMuscleHistory`, `testHistoryDarkLargeText` | VoiceOver en iPhone |
 | §12 Evolución de repeticiones | probado en simulador | misma carga o serie más pesada; lados separados | `ProgressHistoryTests`, UI `testRepsHistory` | — |
 | §16 Ilustraciones de poses | probado en simulador (guía y lista) | 5 ilustraciones propias dibujadas en código | UI `testPoseGuide` | sobre la vista previa de la cámara: iPhone |
+| Combinar no descarta borradores locales | probado en simulador | la sesión cerrada en la copia queda abierta aquí; previsión y resultado lo dicen | `ThirdAuditTests.mergeRetainsLocalDraft`, UI `testExportAndRestoreReport` | — |
+| Ejercicios adicionales al reemplazar | probado con datos simulados | se conservan y se nombran con su uso | `ThirdAuditTests.replaceKeepsLaterCustomExerciseAndSaysSo`, `replaceReportsExtraExerciseUsage` | — |

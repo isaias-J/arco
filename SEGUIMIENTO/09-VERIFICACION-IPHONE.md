@@ -85,11 +85,17 @@ se abre y muestra lo esperado en la previsión; guarda la copia fuera del iPhone
   Elige **Reemplazar con la copia** → **Reemplazar**: aparece una segunda confirmación que dice qué
   se eliminaría. Pulsa **Cancelar**, vuelve a **Combinar (recomendado)** → **Restaurar**.
   El mensaje empieza por "Restauración terminada." y dice "No había registros nuevos".
-4. Registra una serie nueva, confirma un borrador pendiente si tienes uno y restaura otra vez la copia
-   anterior con **Combinar**.
-- **Esperado:** la previsión indica que se conserva la versión de este iPhone; la serie nueva sigue.
-5. Borra Arco del iPhone (mantener pulsado el icono → Eliminar app). Vuelve a instalar con Run.
-6. En Configuración, **Restaurar desde una copia de Arco** → elige el archivo → contraseña correcta →
+4. Empieza un entrenamiento nuevo, escribe un peso y unas repeticiones en un borrador **sin
+   confirmarlo**, y restaura otra vez la misma copia.
+- **Esperado:** con **Combinar**, la previsión no anuncia eliminaciones y dice que esa sesión y
+  su borrador "solo están en este iPhone y se conservan"; tras restaurar, el entrenamiento sigue
+  abierto con el borrador intacto. Con **Reemplazar** (cancela en la confirmación), la previsión
+  muestra en rojo "Se ELIMINARÁN… 1 sesiones, 1 borradores sin realizar".
+5. Crea un ejercicio personalizado nuevo y elige **Reemplazar** en la previsión (cancela después).
+- **Esperado:** dice "Se conserva 1 ejercicio del catálogo que la copia no tiene: <nombre>
+  (personalizado, sin sesiones)…"; no lo presenta como eliminado.
+6. Borra Arco del iPhone (mantener pulsado el icono → Eliminar app). Vuelve a instalar con Run.
+7. En Configuración, **Restaurar desde una copia de Arco** → elige el archivo → contraseña correcta →
    **Restaurar**.
 - **Esperado:** vuelven sesiones, series, pesos, asistencia, rutina, ejercicios personalizados y fotos;
   el ejercicio renombrado conserva su nombre y el archivado sigue archivado. Las fotos se abren tras

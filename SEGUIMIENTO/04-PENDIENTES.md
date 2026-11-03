@@ -1,11 +1,11 @@
 # Arco — Pendientes y próxima acción
 
-Última actualización: 2026-11-03, tras la segunda revisión independiente
-(`10-SEGUNDA-REVISION.md`).
+Última actualización: 2026-11-03, tras la tercera revisión independiente
+(`11-TERCERA-REVISION.md`).
 
 ## Estado verificado
-- `cd ArcoCore && swift test`: 123 pruebas / 19 suites en verde (incluidas las 2 independientes,
-  que antes fallaban).
+- `cd ArcoCore && swift test`: 126 pruebas / 20 suites en verde (incluidas las pruebas de la
+  segunda y tercera revisión).
 - XCUITest en simulador temporal aislado: 19 recorridos en verde en una sola corrida con la
   firma habitual del simulador.
 - Build de la app sin errores. `scripts/preflight-publico.sh` sin hallazgos antes de publicar.

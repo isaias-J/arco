@@ -6,11 +6,13 @@ import SwiftData
 /// Cómo se aplica una copia sobre un iPhone que ya tiene datos (spec §19).
 ///
 /// - `mergeKeepDevice` (recomendada): añade lo que falta y adopta los cambios de la copia que
-///   se pueden ordenar con seguridad; ante un conflicto real conserva lo de este iPhone.
-/// - `mergePreferArchive`: igual, pero ante un conflicto real aplica lo de la copia.
-/// - `replace`: deja entrenamientos, medidas, asistencia, catálogo y ajustes exactamente como en
-///   la copia y elimina de este iPhone los registros que la copia no tiene. Las fotos de este
-///   iPhone nunca se borran al restaurar.
+///   se pueden ordenar con seguridad; ante un conflicto real conserva lo de este iPhone. No
+///   elimina nada, tampoco borradores.
+/// - `mergePreferArchive`: igual, pero ante un conflicto real aplica lo de la copia. Tampoco
+///   elimina nada.
+/// - `replace`: deja entrenamientos, medidas, asistencia, perfil y rutina como en la copia y
+///   elimina de este iPhone los registros que la copia no tiene (incluidos borradores). Los
+///   ejercicios del catálogo que la copia no tiene y las fotos de este iPhone se conservan siempre.
 public enum RestoreStrategy: String, Sendable, CaseIterable, Codable, Hashable {
     case mergeKeepDevice
     case mergePreferArchive
@@ -52,6 +54,19 @@ public struct RestoreReport: Sendable, Equatable {
     public var conflicts: [RestoreConflict] = []
     /// Borradores (series sin realizar) de la copia que no se añadieron a sesiones existentes.
     public var skippedDrafts: Int = 0
+    /// Borradores de este iPhone protegidos porque la copia cerró su sesión: la sesión se deja
+    /// abierta y los borradores se conservan (solo al combinar).
+    public var protectedDrafts: Int = 0
+    /// Ejercicios de este iPhone que la copia no tiene. Nunca se borran, tampoco al reemplazar,
+    /// para no dejar historiales sin ejercicio; la previsión los nombra.
+    public var keptExtraExercises: [KeptExercise] = []
+
+    public struct KeptExercise: Sendable, Equatable {
+        public let name: String
+        public let isCustom: Bool
+        /// Sesiones que lo usan y que quedarán tras restaurar.
+        public let sessionsAfterRestore: Int
+    }
 
     public init() {}
 
@@ -318,9 +333,20 @@ final class ArchiveMerger {
             }
             if write { apply.forEach { $0.apply(d) } }
         }
-        let deviceOnly = device.filter { !archiveIDs.contains($0.id) }.count
-        // Los ejercicios nunca se borran al restaurar: pueden tener historial asociado.
-        bump(&report.onlyOnDevice, "exercises", deviceOnly)
+        let deviceOnlyExercises = device.filter { !archiveIDs.contains($0.id) }
+        // Los ejercicios nunca se borran al restaurar: pueden tener historial asociado. Se
+        // informa de cada uno y de cuántas sesiones lo usarán tras restaurar.
+        bump(&report.onlyOnDevice, "exercises", deviceOnlyExercises.count)
+        if !deviceOnlyExercises.isEmpty {
+            var usage: [String: Set<UUID>] = [:]
+            for s in payload.sessions { for e in s.exercises { usage[e.exerciseID, default: []].insert(s.id) } }
+            if strategy != .replace {
+                for s in fetchAll(WorkoutSessionModel.self) { for e in s.exercises { usage[e.exerciseID, default: []].insert(s.id) } }
+            }
+            report.keptExtraExercises = deviceOnlyExercises
+                .map { RestoreReport.KeptExercise(name: $0.name, isCustom: $0.originRaw == ExerciseOrigin.custom.rawValue, sessionsAfterRestore: usage[$0.id]?.count ?? 0) }
+                .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        }
     }
 
     private static func short(_ s: String) -> String {
@@ -404,6 +430,14 @@ final class ArchiveMerger {
 
     // MARK: Sesiones, ejercicios de sesión y series
 
+    /// Cuenta series aparte de borradores (series sin realizar), para que la previsión diga
+    /// exactamente qué se conserva o se elimina.
+    private func countSets(_ sets: [SetRecordModel], into dict: inout [String: Int]) {
+        let drafts = sets.filter { $0.stateRaw == SetState.pending.rawValue }.count
+        bump(&dict, "drafts", drafts)
+        bump(&dict, "sets", sets.count - drafts)
+    }
+
     private static func isTerminal(_ state: String) -> Bool { state != "active" }
 
     private func mergeSessions() {
@@ -424,10 +458,11 @@ final class ArchiveMerger {
         let deviceOnly = device.filter { !archiveIDs.contains($0.id) }
         if strategy == .replace {
             bump(&report.removed, "sessions", deviceOnly.count)
-            bump(&report.removed, "sets", deviceOnly.reduce(0) { $0 + $1.exercises.reduce(0) { $0 + $1.sets.count } })
+            countSets(deviceOnly.flatMap { $0.exercises.flatMap(\.sets) }, into: &report.removed)
             if write { deviceOnly.forEach { context.delete($0) } }   // cascada: ejercicios y series
         } else {
             bump(&report.onlyOnDevice, "sessions", deviceOnly.count)
+            countSets(deviceOnly.flatMap { $0.exercises.flatMap(\.sets) }, into: &report.onlyOnDevice)
         }
     }
 
@@ -474,25 +509,29 @@ final class ArchiveMerger {
 
     private func mergeSession(_ d: WorkoutSessionModel, _ a: ArchivePayload.Session, deviceSets: [UUID: SetRecordModel]) {
         let wasActive = d.stateRaw == "active"
-        let outcome = sessionOutcome(d, a)
-        let applyMeta = settle(outcome, "sessions", "Sesión del \(day(a.trainingDate)): fecha, estado u hora de cierre distintos")
+        let archiveSetIDs = Set(a.exercises.flatMap { $0.sets.map(\.id) })
+        // Borradores de este iPhone que la copia no tiene (pueden llevar peso y repeticiones
+        // escritos). Al combinar NUNCA se descartan: si la copia cerró la sesión, aquí se deja
+        // abierta para que el usuario los confirme o descarte. Solo "Reemplazar" los elimina, y su
+        // confirmación los enumera.
+        let localDrafts = d.exercises.flatMap(\.sets).filter { $0.stateRaw == SetState.pending.rawValue && !archiveSetIDs.contains($0.id) }
+        let protectDrafts = strategy != .replace && wasActive && Self.isTerminal(a.state) && !localDrafts.isEmpty
+
+        let applyMeta: Bool
+        if protectDrafts {
+            report.conflicts.append(RestoreConflict(
+                category: "sessions",
+                summary: "Sesión del \(day(a.trainingDate)): la copia la cerró, pero aquí sigue abierta con \(localDrafts.count) \(localDrafts.count == 1 ? "borrador" : "borradores") que la copia no tiene. Se deja abierta y se conservan los borradores para que los confirmes o descartes tú.",
+                resolution: .keptDevice))
+            report.protectedDrafts += localDrafts.count
+            applyMeta = false
+        } else {
+            applyMeta = settle(sessionOutcome(d, a), "sessions", "Sesión del \(day(a.trainingDate)): fecha, estado u hora de cierre distintos")
+        }
         if applyMeta && write {
             d.startedAt = a.startedAt; d.endedAt = a.endedAt; d.stateRaw = a.state
             d.trainingDate = a.trainingDate; d.originTimeZoneID = a.timeZone; d.templateID = a.templateID
             touchedSessions[d.id] = d
-        }
-        let archiveSetIDs = Set(a.exercises.flatMap { $0.sets.map(\.id) })
-        // Si la copia cerró la sesión, los borradores locales que la copia no tiene se descartan,
-        // igual que al finalizar en Arco (un borrador nunca fue una serie realizada).
-        if applyMeta && wasActive && Self.isTerminal(a.state) {
-            let drafts = d.exercises.flatMap(\.sets).filter { $0.stateRaw == SetState.pending.rawValue && !archiveSetIDs.contains($0.id) }
-            bump(&report.removed, "drafts", drafts.count)
-            if write {
-                for draft in drafts {
-                    draft.sessionExercise?.sets.removeAll { $0.id == draft.id }
-                    context.delete(draft)
-                }
-            }
         }
         let sessionIsTerminal = Self.isTerminal(applyMeta ? a.state : d.stateRaw)
 
@@ -520,7 +559,7 @@ final class ArchiveMerger {
         let deviceOnlySE = d.exercises.filter { !archiveSEIDs.contains($0.id) }
         if strategy == .replace {
             bump(&report.removed, "sessionExercises", deviceOnlySE.count)
-            bump(&report.removed, "sets", deviceOnlySE.reduce(0) { $0 + $1.sets.count })
+            countSets(deviceOnlySE.flatMap(\.sets), into: &report.removed)
             if write {
                 for se in deviceOnlySE {
                     d.exercises.removeAll { $0.id == se.id }
@@ -530,6 +569,7 @@ final class ArchiveMerger {
             }
         } else {
             bump(&report.onlyOnDevice, "sessionExercises", deviceOnlySE.count)
+            countSets(deviceOnlySE.flatMap(\.sets), into: &report.onlyOnDevice)
         }
     }
 
@@ -583,13 +623,13 @@ final class ArchiveMerger {
         }
         let deviceOnly = dse.sets.filter { !archiveSetIDs.contains($0.id) }
         if strategy == .replace {
-            bump(&report.removed, "sets", deviceOnly.count)
+            countSets(deviceOnly, into: &report.removed)
             if write {
                 for s in deviceOnly { dse.sets.removeAll { $0.id == s.id }; context.delete(s) }
                 touchedSessions[session.id] = session
             }
         } else {
-            bump(&report.onlyOnDevice, "sets", deviceOnly.count)
+            countSets(deviceOnly, into: &report.onlyOnDevice)
         }
     }
 

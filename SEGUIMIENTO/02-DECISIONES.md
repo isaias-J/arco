@@ -62,3 +62,12 @@
 - Las copias nuevas guardan fechas con milisegundos (`datePrecision = "ms"`); el lector acepta las
   anteriores en segundos. El número de formato sigue en 2.
 - Ver tabla completa en `10-SEGUNDA-REVISION.md`.
+
+## 2026-11-03 — Borradores y ejercicios al restaurar (tercera revisión)
+- Combinar nunca descarta borradores: si la copia cerró una sesión que aquí tiene borradores
+  propios, la sesión queda abierta y el usuario decide. Alternativa descartada: pedir una
+  confirmación específica para descartarlos; conservar es más simple y no pierde nada, y quien
+  quiera el estado exacto de la copia tiene "Reemplazar".
+- Reemplazar no borra ejercicios del catálogo que la copia no tiene: se nombran en la previsión,
+  la confirmación y el resultado. Alternativa descartada: borrarlos (dejaría historiales o
+  plantillas sin ejercicio) u ofrecer un reemplazo "exacto" del catálogo.

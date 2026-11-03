@@ -15,16 +15,16 @@ Arco.xcodeproj          proyecto (abrir este)
 App/Arco/               app SwiftUI: vistas, servicios del sistema (cámara, avisos, Face ID, cifrado)
 ArcoCore/               paquete Swift: dominio, ciencia, analítica, modelos SwiftData, repositorios,
                         copia cifrada portable, planificador de avisos
-ArcoCore/Tests/         123 pruebas (lógica e integración con SwiftData real)
+ArcoCore/Tests/         126 pruebas (lógica e integración con SwiftData real)
 AppUITests/             19 recorridos de interfaz (XCUITest)
 SEGUIMIENTO/            requisitos, decisiones, matriz de pruebas, pendientes, seguridad, etapas,
-                        verificaciones para el iPhone (09), segunda revisión (10)
+                        verificaciones para el iPhone (09), segunda y tercera revisión (10, 11)
 scripts/preflight-publico.sh   revisión de seguridad antes de cada push
 ```
 
 ## 3. Compilar y probar
 ```bash
-cd ArcoCore && swift test                         # 123 pruebas, sin simulador
+cd ArcoCore && swift test                         # 126 pruebas, sin simulador
 
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 xcodebuild -project Arco.xcodeproj -scheme Arco \
@@ -61,14 +61,16 @@ Con una cuenta gratuita la instalación caduca a los 7 días.
   de cambiar nada y vuelve a cifrar las fotos con la clave del nuevo dispositivo. Antes de
   restaurar muestra qué se añadirá, qué ya está, qué conflictos hay y qué se eliminaría. Opciones:
   **Combinar** (recomendado; ante un conflicto conserva este iPhone), **Combinar usando la copia en
-  los conflictos**, o **Reemplazar con la copia** (segunda confirmación; nunca borra fotos). Reglas
+  los conflictos** (ninguna de las dos elimina nada, tampoco borradores sin confirmar), o
+  **Reemplazar con la copia** (segunda confirmación que enumera lo que se eliminará; nunca borra
+  fotos ni ejercicios del catálogo, y nombra los ejercicios que conserva). Reglas
   completas en `SEGUIMIENTO/10-SEGUNDA-REVISION.md`. También puedes restaurar desde la primera
   pantalla de configuración.
 - Si pierdes el iPhone sin una copia exportada, los datos y fotos no se pueden recuperar.
 
 ## 6. Qué está verificado
 Detalle por criterio en `SEGUIMIENTO/03-PRUEBAS.md`.
-- **Con datos simulados (123 pruebas):** conteo muscular y pares unilaterales, atribuciones
+- **Con datos simulados (126 pruebas):** conteo muscular y pares unilaterales, atribuciones
   (incluidas las personalizadas), récords, gráficas sin asistencia, peso e IMC, asistencia y
   descansos, días de la rutina, historial de versiones de la rutina en la adherencia y la racha,
   planificador de avisos (cancelación, aplazamiento, horarios por día, fechas límite), catálogo

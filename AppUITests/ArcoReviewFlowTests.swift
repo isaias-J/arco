@@ -188,6 +188,16 @@ final class ArcoReviewFlowTests: XCTestCase {
         _ = tapSystemButton(app, ["Reemplazar", "Replace", "Sustituir"], timeout: 3)
         XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH 'Copia cifrada exportada'")).firstMatch.waitForExistence(timeout: 10))
 
+        // Después de exportar, se abre una sesión nueva con borradores sin confirmar: solo existe aquí.
+        XCTAssertFalse(app.keyboards.firstMatch.exists, "Al exportar se cierra el teclado")
+        app.tabBars.buttons["Hoy"].tap()
+        XCTAssertTrue(app.buttons["today.start"].waitForExistence(timeout: 5))
+        app.buttons["today.start"].tap()
+        XCTAssertTrue(app.staticTexts["Tu selección (1)"].waitForExistence(timeout: 5))
+        app.buttons["selection.start"].tap()
+        XCTAssertTrue(app.textFields.matching(identifier: "set.weight").firstMatch.waitForExistence(timeout: 5))
+        app.tabBars.buttons["Perfil"].tap()
+
         // Contraseña incorrecta: no se modifica nada.
         let restore = app.buttons["backup.restore"]
         scrollTo(restore, in: app)
@@ -215,22 +225,36 @@ final class ArcoReviewFlowTests: XCTestCase {
         for _ in 0..<6 where !unchanged.exists { app.swipeUp() }
         XCTAssertTrue(unchanged.exists, "Sobre los mismos datos, la previsión dice que ya están")
         XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH 'Se añadirán'")).firstMatch.exists, "No promete añadir lo que ya existe")
+        XCTAssertFalse(app.staticTexts.containing(NSPredicate(format: "label CONTAINS 'ELIMINARÁN'")).firstMatch.exists, "Combinar no elimina nada")
+        let keptHere = app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH 'Solo están en este iPhone y se conservan' AND label CONTAINS 'borradores sin realizar'")).firstMatch
         shot(app, "37-restaurar-prevision")
+        XCTAssertTrue(keptHere.exists, "La sesión abierta y sus borradores se conservan al combinar")
         let replaceOption = app.buttons["Reemplazar con la copia"]
         for _ in 0..<4 where !replaceOption.isHittable { app.swipeDown() }
         replaceOption.tap()
+        let removal = app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH 'Se ELIMINARÁN de este iPhone: 1 sesiones' AND label CONTAINS 'borradores sin realizar'")).firstMatch
+        for _ in 0..<6 where !removal.exists { app.swipeUp() }
+        XCTAssertTrue(removal.exists, "Reemplazar anuncia que elimina la sesión abierta y sus borradores")
+        shot(app, "37b-restaurar-prevision-reemplazo")
         app.buttons["restore.confirm"].tap()
-        XCTAssertTrue(app.alerts.firstMatch.waitForExistence(timeout: 5), "Reemplazar pide una segunda confirmación")
+        let alert = app.alerts.firstMatch
+        XCTAssertTrue(alert.waitForExistence(timeout: 5), "Reemplazar pide una segunda confirmación")
+        XCTAssertTrue(alert.staticTexts.containing(NSPredicate(format: "label CONTAINS 'borradores sin realizar'")).firstMatch.exists, "La confirmación enumera los borradores")
         shot(app, "38-restaurar-reemplazo-confirmacion")
-        app.alerts.firstMatch.buttons["Cancelar"].tap()
+        alert.buttons["Cancelar"].tap()
         let mergeOption = app.buttons["Combinar (recomendado)"]
-        for _ in 0..<4 where !mergeOption.isHittable { app.swipeDown() }
+        for _ in 0..<6 where !mergeOption.isHittable { app.swipeDown() }
         mergeOption.tap()
         app.buttons["restore.confirm"].tap()
         let message = app.staticTexts["backup.message"]
         XCTAssertTrue(message.waitForExistence(timeout: 20))
         XCTAssertTrue(message.label.hasPrefix("Restauración terminada."), message.label)
         XCTAssertTrue(message.label.contains("No había registros nuevos"), message.label)
+        XCTAssertTrue(message.label.contains("Conservado lo que solo estaba aquí"), message.label)
+        XCTAssertFalse(message.label.contains("Eliminado"), message.label)
         shot(app, "39-restaurar-resultado")
+        // La sesión abierta sigue ahí para reanudarla.
+        app.tabBars.buttons["Hoy"].tap()
+        XCTAssertTrue(app.textFields.matching(identifier: "set.weight").firstMatch.waitForExistence(timeout: 5) || app.buttons["Reanudar entrenamiento"].waitForExistence(timeout: 5))
     }
 }

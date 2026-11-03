@@ -137,6 +137,7 @@ struct BackupView: View {
 
     private func exportArchive() async {
         guard passwordProblem == nil else { return }
+        hideKeyboard()
         working = true
         defer { working = false }
         let withPhotos = includePhotos && vaultUnlocked && !photos.isEmpty
@@ -308,7 +309,12 @@ struct RestorePreviewSheet: View {
 
                 Section {
                     ForEach(RestoreReportText.forecastLines(plan, strategy: strategy), id: \.self) { line in
-                        Text(line).font(.subheadline)
+                        if line.hasPrefix("Se ELIMINARÁN") {
+                            Label(line, systemImage: "exclamationmark.triangle.fill")
+                                .font(.subheadline.bold()).foregroundStyle(.red)
+                        } else {
+                            Text(line).font(.subheadline)
+                        }
                     }
                 } header: {
                     Text(hasExistingData ? "Qué pasará con los datos de este iPhone" : "Qué se añadirá")
@@ -381,11 +387,11 @@ enum RestoreReportText {
     static func explanation(_ s: RestoreStrategy) -> String {
         switch s {
         case .mergeKeepDevice:
-            return "Añade lo que falta y adopta los cambios de la copia cuando se puede saber que son posteriores (por ejemplo, una serie confirmada después de su borrador). Si un registro cambió de forma distinta en los dos lados, se queda lo de este iPhone. No borra nada."
+            return "Añade lo que falta y adopta los cambios de la copia cuando se puede saber que son posteriores (por ejemplo, una serie confirmada después de su borrador). Si un registro cambió de forma distinta en los dos lados, se queda lo de este iPhone. No elimina nada de este iPhone, tampoco borradores: si la copia cerró una sesión que aquí sigue abierta con borradores, se deja abierta para que decidas tú."
         case .mergePreferArchive:
-            return "Igual que combinar, pero en los conflictos se aplica lo de la copia. No borra nada de este iPhone."
+            return "Igual que combinar, pero en los conflictos se aplica lo de la copia. Tampoco elimina nada de este iPhone ni descarta borradores."
         case .replace:
-            return "Deja entrenamientos, medidas, asistencia, catálogo, perfil y rutina exactamente como en la copia y elimina de este iPhone lo que la copia no tiene. Las fotos de este iPhone nunca se borran. Crea antes una copia de este iPhone si quieres poder volver atrás."
+            return "Deja entrenamientos, medidas, asistencia, perfil y rutina como en la copia y elimina de este iPhone lo que la copia no tiene, incluidos borradores sin confirmar. Los ejercicios del catálogo que coinciden quedan como en la copia; los que la copia no tiene se conservan (si los hay, se nombran abajo) y las fotos de este iPhone nunca se borran. Crea antes una copia de este iPhone si quieres poder volver atrás."
         }
     }
 
@@ -398,9 +404,9 @@ enum RestoreReportText {
             out.append("Conflictos: \(r.conflicts.count) (\(strategy == .mergeKeepDevice ? "se conservará lo de este iPhone" : "se aplicará lo de la copia")).")
         }
         if r.skippedDrafts > 0 { out.append("No se añadirán \(r.skippedDrafts) borradores sin realizar de sesiones que aquí ya existen.") }
-        if let drafts = r.removed["drafts"], drafts > 0 { out.append("Se descartarán \(drafts) borradores sin realizar de sesiones que la copia ya cerró.") }
-        let removed = r.removed.filter { $0.key != "drafts" }
-        if !removed.isEmpty { out.append("Se ELIMINARÁN de este iPhone: \(list(removed)).") }
+        if r.protectedDrafts > 0 { out.append("Se conservarán \(r.protectedDrafts) borradores de este iPhone (con sus pesos y repeticiones); sus sesiones quedan abiertas aunque la copia las cerró.") }
+        if !r.removed.isEmpty { out.append("Se ELIMINARÁN de este iPhone: \(list(r.removed)).") }
+        if let kept = keptExercisesText(r) { out.append(kept) }
         let onlyHere = r.onlyOnDevice.filter { $0.key != "exercises" }
         if !onlyHere.isEmpty { out.append("Solo están en este iPhone y se conservan: \(list(onlyHere)).") }
         if !r.skippedExisting.isEmpty { out.append("Ya están aquí sin cambios: \(r.total(r.skippedExisting)) registros.") }
@@ -409,9 +415,22 @@ enum RestoreReportText {
     }
 
     static func replaceWarning(_ r: RestoreReport) -> String {
-        let removed = r.removed.filter { $0.key != "drafts" }
-        let what = removed.isEmpty ? "No se eliminará ningún registro." : "Se eliminarán de este iPhone: \(list(removed))."
-        return "\(what) Los registros que también están en la copia quedarán como en la copia. Las fotos de este iPhone se conservan. Esta acción no se puede deshacer salvo con otra copia."
+        let what = r.removed.isEmpty ? "No se eliminará ningún registro." : "Se eliminarán de este iPhone: \(list(r.removed))."
+        let kept = keptExercisesText(r).map { " \($0)" } ?? ""
+        return "\(what) Los registros que también están en la copia quedarán como en la copia. Las fotos de este iPhone se conservan.\(kept) Esta acción no se puede deshacer salvo con otra copia."
+    }
+
+    /// Ejercicios que la copia no tiene: nunca se borran. Se nombran (hasta 5) con su uso.
+    static func keptExercisesText(_ r: RestoreReport) -> String? {
+        let items = r.keptExtraExercises
+        guard !items.isEmpty else { return nil }
+        let shown = items.prefix(5).map { e -> String in
+            let kind = e.isCustom ? "personalizado" : "preinstalado"
+            let use = e.sessionsAfterRestore == 0 ? "sin sesiones" : "\(e.sessionsAfterRestore) \(e.sessionsAfterRestore == 1 ? "sesión" : "sesiones")"
+            return "\(e.name) (\(kind), \(use))"
+        }.joined(separator: ", ")
+        let more = items.count > 5 ? " y \(items.count - 5) más" : ""
+        return "\(items.count == 1 ? "Se conserva 1 ejercicio" : "Se conservan \(items.count) ejercicios") del catálogo que la copia no tiene: \(shown)\(more). No se borran para no dejar historiales sin ejercicio; puedes archivarlos en Catálogo."
     }
 
     /// Mensaje final: solo dice "completa" si todo lo de la copia quedó reflejado.
@@ -425,8 +444,9 @@ enum RestoreReportText {
         if r.conflictsKeptDevice > 0 { parts.append("\(r.conflictsKeptDevice) conflictos: se conservó lo de este iPhone y no se aplicó lo de la copia.") }
         if r.conflictsUsedArchive > 0 { parts.append("\(r.conflictsUsedArchive) conflictos: se aplicó lo de la copia.") }
         if r.skippedDrafts > 0 { parts.append("\(r.skippedDrafts) borradores sin realizar no se añadieron.") }
-        let removed = r.removed.filter { $0.key != "drafts" }
-        if !removed.isEmpty { parts.append("Eliminado de este iPhone: \(list(removed)).") }
+        if r.protectedDrafts > 0 { parts.append("Se conservaron \(r.protectedDrafts) borradores de este iPhone; sus sesiones siguen abiertas para que los confirmes o descartes.") }
+        if !r.removed.isEmpty { parts.append("Eliminado de este iPhone: \(list(r.removed)).") }
+        if let kept = keptExercisesText(r) { parts.append(kept) }
         let onlyHere = r.onlyOnDevice.filter { $0.key != "exercises" }
         if !onlyHere.isEmpty { parts.append("Conservado lo que solo estaba aquí: \(list(onlyHere)).") }
         return parts.joined(separator: " ")
