@@ -2,7 +2,8 @@ import SwiftUI
 import SwiftData
 import ArcoCore
 
-/// Perfil: peso, altura, IMC, medidas y ajustes (spec §18, §20). Desde aquí se gestionan ajustes.
+/// Perfil: datos personales, peso, altura, IMC, medidas y ajustes (spec §18, §20).
+/// Desde aquí se gestionan los ajustes (sin pestaña extra de configuración).
 struct ProfileView: View {
     @Environment(AppState.self) private var appState
     @Query private var profiles: [UserProfileModel]
@@ -13,31 +14,72 @@ struct ProfileView: View {
 
     private var profile: UserProfileModel? { profiles.first }
 
+    private var weightEntries: [BodyWeightEntry] { weights.map { $0.toDomain() } }
+
+    /// Peso actual: medición válida más reciente por fecha (T52, T54).
     private var currentWeight: BodyWeightEntry? {
-        BodyWeightAnalytics.currentWeight(from: weights.map { $0.toDomain() })
+        BodyWeightAnalytics.currentWeight(from: weightEntries)
     }
 
-    private var bmi: BMIResult? {
-        guard let w = currentWeight, let h = heights.first else { return nil }
-        return BMICalculator.bmi(
-            mass: w.amount, massUnit: w.unit,
-            height: h.amount, heightUnit: LengthUnit(rawValue: h.unitRaw) ?? .centimeters,
-            isEstimated: w.isEstimated
-        )
+    private var heightRecords: [HeightRecord] {
+        heights.compactMap { h in
+            guard h.amount > 0 else { return nil }
+            let unit = LengthUnit(rawValue: h.unitRaw) ?? .centimeters
+            return HeightRecord(date: h.date, meters: UnitConverter.meters(h.amount, from: unit))
+        }
     }
+
+    /// IMC actual con la altura vigente en la fecha del peso actual (T58).
+    private var currentBMI: (result: BMIResult, assumed: Bool)? {
+        guard let w = currentWeight,
+              let h = BMIHistory.height(at: w.measurementDate, in: heightRecords),
+              let bmi = BMICalculator.bmi(massKilograms: w.kilograms, heightMeters: h.meters, isEstimated: w.isEstimated)
+        else { return nil }
+        return (bmi, h.assumed)
+    }
+
+    private var age: Int? {
+        guard let b = profile?.birthDate else { return nil }
+        return AgeCalculator.age(birthDate: b, on: Date(), calendar: appState.calendar)
+    }
+
+    private var bmiPolicy: BMIInterpretationPolicy { .policy(age: age) }
 
     var body: some View {
         NavigationStack {
             List {
+                personalSection
                 weightSection
-                bmiSection
+                weightChartSection
+                heightSection
+                if let currentBMI {
+                    BMICurrentSection(bmi: currentBMI.result, usesAssumedHeight: currentBMI.assumed, policy: bmiPolicy)
+                    bmiHistorySection
+                }
                 measurementsSection
-                settingsSection
+                ProfileSettingsSection()
+                linksSection
                 aboutSection
             }
             .navigationTitle("Perfil")
             .sheet(isPresented: $showAddWeight) {
-                AddWeightView()
+                WeightEditorView()
+            }
+        }
+    }
+
+    // MARK: - Secciones
+
+    private var personalSection: some View {
+        Section("Datos personales") {
+            NavigationLink {
+                PersonalDataView()
+            } label: {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(profile?.displayName ?? "Sin nombre indicado")
+                    Text(age.map { "\($0) años" } ?? "Edad desconocida")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
         }
     }
@@ -48,43 +90,56 @@ struct ProfileView: View {
                 HStack {
                     Text("Peso actual")
                     Spacer()
-                    Text("\(NSDecimalNumber(decimal: w.amount).stringValue) \(w.unit.rawValue)")
+                    Text(ProfileFormat.massText(kilograms: w.kilograms, unit: appState.settings.massUnit))
                         .monospacedDigit()
                     if w.isEstimated {
-                        Text("estimado").font(.caption2).foregroundStyle(.secondary)
+                        Text("estimado")
+                            .font(.caption2.bold())
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(.quaternary, in: Capsule())
                     }
                 }
-                Text("Medido el \(w.measurementDate.formatted(.dateTime.day().month().year()))")
+                .accessibilityElement(children: .combine)
+                Text("\(ProfileFormat.age(of: w.measurementDate, calendar: appState.calendar).capitalizedFirst) · \(ProfileFormat.date(w.measurementDate))")
                     .font(.caption).foregroundStyle(.secondary)
             } else {
-                Text("Sin pesaje registrado").foregroundStyle(.secondary)
+                Text("Peso desconocido: sin pesaje registrado").foregroundStyle(.secondary)
             }
             Button("Añadir pesaje") { showAddWeight = true }
+            NavigationLink("Historial de peso") { WeightHistoryView() }
         }
     }
 
     @ViewBuilder
-    private var bmiSection: some View {
-        if let bmi {
-            Section("IMC (referencia adulta NHS/NICE, 18+)") {
-                HStack {
-                    Text("IMC")
-                    Spacer()
-                    Text(NSDecimalNumber(decimal: bmi.displayValue).stringValue)
-                        .font(.title3.bold()).monospacedDigit()
-                    if bmi.isEstimated {
-                        Text("estimado").font(.caption2).foregroundStyle(.secondary)
-                    }
-                }
-                Text(bandLabel(bmi.band))
-                    .foregroundStyle(.secondary)
-                if bmi.displayCrossesBoundary {
-                    Text("Valor exacto: \(NSDecimalNumber(decimal: bmi.rawValue).stringValue)")
-                        .font(.caption2).foregroundStyle(.secondary)
-                }
-                Text("El IMC no distingue músculo de grasa y es una referencia general, no una evaluación individual.")
-                    .font(.caption2).foregroundStyle(.secondary)
+    private var weightChartSection: some View {
+        if !weights.isEmpty {
+            Section("Gráfico de peso") {
+                WeightChartCard(entries: weightEntries, unit: appState.settings.massUnit, calendar: appState.calendar)
             }
+        }
+    }
+
+    private var heightSection: some View {
+        Section("Altura") {
+            if let h = heights.first {
+                let unit = LengthUnit(rawValue: h.unitRaw) ?? .centimeters
+                let shown = ProfileFormat.length(h.amount, from: unit, to: appState.settings.lengthUnit)
+                LabeledContent("Altura más reciente", value: "\(ProfileFormat.number(shown)) \(appState.settings.lengthUnit.rawValue)")
+                Text("Registrada el \(ProfileFormat.date(h.date))")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                Text("Altura desconocida").foregroundStyle(.secondary)
+            }
+            NavigationLink("Historial de altura") { HeightHistoryView() }
+        }
+    }
+
+    private var bmiHistorySection: some View {
+        Section("IMC histórico") {
+            BMIHistoryChart(
+                points: BMIHistory.points(weights: weightEntries, heights: heightRecords),
+                showsReferenceLines: bmiPolicy.showsInterpretation
+            )
         }
     }
 
@@ -94,17 +149,12 @@ struct ProfileView: View {
         }
     }
 
-    private var settingsSection: some View {
-        Section("Ajustes") {
-            Picker("Tema", selection: Binding(
-                get: { appState.theme },
-                set: { appState.settings.themeRaw = $0.rawValue; try? appState.context.save() }
-            )) {
-                ForEach(AppTheme.allCases) { Text($0.label).tag($0) }
-            }
+    private var linksSection: some View {
+        Section("Privacidad y datos") {
             NavigationLink("Recordatorios") { NotificationSettingsView() }
             NavigationLink("Copia de seguridad") { BackupView() }
-            NavigationLink("Bóveda y privacidad") { PrivacySettingsView() }
+            NavigationLink("Bóveda de fotos") { VaultSettingsView() }
+            NavigationLink("Privacidad") { PrivacySettingsView() }
         }
     }
 
@@ -114,57 +164,10 @@ struct ProfileView: View {
                 .font(.footnote).foregroundStyle(.secondary)
         }
     }
-
-    private func bandLabel(_ b: BMIBand) -> String {
-        switch b {
-        case .underweight: return "Por debajo del rango de referencia"
-        case .healthy: return "Dentro del rango de referencia"
-        case .overweight: return "Por encima del rango de referencia"
-        case .obese: return "Muy por encima del rango de referencia"
-        }
-    }
 }
 
-/// Alta de pesaje (spec §18): peso sin foto es válido; medido/estimado explícito.
-struct AddWeightView: View {
-    @Environment(AppState.self) private var appState
-    @Environment(\.dismiss) private var dismiss
-    @State private var amountText = ""
-    @State private var isEstimated = false
-    @State private var date = Date()
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                HStack {
-                    TextField("Peso", text: $amountText).keyboardType(.decimalPad)
-                    Text(appState.settings.massUnit.rawValue).foregroundStyle(.secondary)
-                }
-                DatePicker("Fecha de medición", selection: $date, in: ...Date(), displayedComponents: .date)
-                Toggle("Marcar como estimado", isOn: $isEstimated)
-            }
-            .navigationTitle("Añadir pesaje")
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Guardar") { save() }
-                }
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancelar") { dismiss() }
-                }
-            }
-        }
-    }
-
-    private func save() {
-        guard let amount = DecimalParser(locale: .current).parse(amountText) else { return }
-        appState.context.insert(BodyWeightModel(
-            measurementDate: date, enteredAt: Date(),
-            amount: amount, unitRaw: appState.settings.massUnit.rawValue,
-            isEstimated: isEstimated
-        ))
-        try? appState.context.save()
-        dismiss()
-    }
+private extension String {
+    var capitalizedFirst: String { prefix(1).uppercased() + dropFirst() }
 }
 
 struct PrivacySettingsView: View {

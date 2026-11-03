@@ -330,6 +330,16 @@ public struct WorkoutRepository {
         }
     }
 
+    /// Deshace una confirmación recién hecha: la serie vuelve a ser borrador con sus valores.
+    public func unconfirm(_ model: SetRecordModel) {
+        guard model.stateRaw == SetState.completed.rawValue else { return }
+        model.stateRaw = SetState.pending.rawValue
+        try? saver(context)
+        if let session = model.sessionExercise?.session {
+            reconcileAutomaticAttendance(for: session)
+        }
+    }
+
     /// Edita una serie ya confirmada (corrección). Conserva su hora real.
     public func edit(_ model: SetRecordModel, amount: Decimal?, unit: MassUnit, convention: LoadConvention, reps: Int?, type: SetType, side: BodySide, rir: RIR?) throws {
         let candidate = SetRecord(

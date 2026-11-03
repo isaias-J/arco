@@ -117,6 +117,18 @@ final class VaultLock {
 
     // MARK: - Configuración del PIN
 
+    /// Comprueba el PIN actual (p. ej. antes de cambiarlo) sin alterar el estado de
+    /// desbloqueo. Respeta y alimenta la misma limitación de intentos persistente (T60).
+    func verifyPIN(_ pin: String) -> Bool {
+        guard pinAuth.timeUntilNextAttempt() <= 0 else { return false }
+        if pinAuth.verify(pin) {
+            pinAuth.resetAttempts()
+            return true
+        }
+        pinAuth.recordFailedAttempt()
+        return false
+    }
+
     /// Crea o cambia el PIN de la bóveda. La UI valida longitud/confirmación antes de llamar.
     func configurePIN(_ pin: String) throws {
         try pinAuth.setPIN(pin)

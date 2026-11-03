@@ -38,7 +38,7 @@ struct BodyMeasurementsView: View {
                     emptyState
                 } else {
                     ForEach(groupedTypes) { group in
-                        MeasurementTypeCard(group: group)
+                        MeasurementTypeCard(group: group, displayUnit: appState.settings.lengthUnit, onDelete: delete)
                     }
                 }
                 disclaimerCard
@@ -58,6 +58,11 @@ struct BodyMeasurementsView: View {
         .sheet(isPresented: $showAdd) {
             AddBodyMeasurementView()
         }
+    }
+
+    private func delete(_ measurement: BodyMeasurementModel) {
+        appState.context.delete(measurement)
+        try? appState.context.save()
     }
 
     private var emptyState: some View {
@@ -92,6 +97,10 @@ struct BodyMeasurementsView: View {
 /// izquierdo/derecho ni protocolos distintos en una sola línea.
 private struct MeasurementTypeCard: View {
     let group: MeasurementTypeGroup
+    /// Unidad de longitud configurada: todos los valores se convierten a ella antes de graficar
+    /// o calcular cambios (hallazgo 12: nunca se mezclan cm y pulgadas sin convertir).
+    let displayUnit: LengthUnit
+    let onDelete: (BodyMeasurementModel) -> Void
 
     /// Series separadas por (lado, protocolo). Cada combinación es una línea distinta (T59).
     private var series: [MeasurementSeries] {
@@ -108,11 +117,6 @@ private struct MeasurementTypeCard: View {
             .sorted { $0.seriesLabel < $1.seriesLabel }
     }
 
-    private var unitLabel: String {
-        // Todas las filas de un tipo suelen compartir unidad; mostramos la de la más reciente.
-        group.measurements.max(by: { $0.date < $1.date })?.unitRaw ?? LengthUnit.centimeters.rawValue
-    }
-
     var body: some View {
         ArcoCard {
             VStack(alignment: .leading, spacing: Spacing.md) {
@@ -120,7 +124,7 @@ private struct MeasurementTypeCard: View {
                     .font(.headline)
 
                 ForEach(series) { s in
-                    MeasurementSeriesSection(series: s, unitLabel: unitLabel)
+                    MeasurementSeriesSection(series: s, displayUnit: displayUnit, onDelete: onDelete)
                     if s.id != series.last?.id {
                         Divider()
                     }
@@ -131,28 +135,39 @@ private struct MeasurementTypeCard: View {
 }
 
 /// Una serie (lado + protocolo): gráfico de puntos, cambio absoluto y periodo comparable.
+/// Todos los valores se convierten a la unidad configurada (vía metros) antes de graficar o
+/// restar; la tabla muestra además el valor original si se registró en otra unidad.
 private struct MeasurementSeriesSection: View {
     let series: MeasurementSeries
-    let unitLabel: String
+    let displayUnit: LengthUnit
+    let onDelete: (BodyMeasurementModel) -> Void
 
-    private var values: [(date: Date, value: Double)] {
-        series.points.map { ($0.date, NSDecimalNumber(decimal: $0.amount).doubleValue) }
+    @State private var pendingDelete: BodyMeasurementModel?
+
+    private var unitLabel: String { displayUnit.rawValue }
+
+    private func converted(_ m: BodyMeasurementModel) -> Decimal {
+        ProfileFormat.length(m.amount, from: LengthUnit(rawValue: m.unitRaw) ?? .centimeters, to: displayUnit)
     }
 
-    /// Cambio absoluto entre la primera y la última observación (spec §18). No es porcentaje
-    /// (evita infinitos) ni se proclama "crecimiento": es la diferencia observada.
+    private var values: [(id: UUID, date: Date, value: Double)] {
+        series.points.map { ($0.id, $0.date, NSDecimalNumber(decimal: converted($0)).doubleValue) }
+    }
+
+    /// Cambio absoluto entre la primera y la última observación (spec §18), en la unidad
+    /// configurada. No es porcentaje ni se proclama "crecimiento": es la diferencia observada.
     private var absoluteChange: Decimal? {
-        guard let first = series.points.first?.amount,
-              let last = series.points.last?.amount,
-              series.points.count >= 2 else { return nil }
-        return last - first
+        guard series.points.count >= 2,
+              let first = series.points.first,
+              let last = series.points.last else { return nil }
+        return converted(last) - converted(first)
     }
 
     private var periodLabel: String? {
         guard let first = series.points.first?.date,
               let last = series.points.last?.date,
               series.points.count >= 2 else { return nil }
-        return "\(first.formatted(.dateTime.day().month().year())) – \(last.formatted(.dateTime.day().month().year()))"
+        return "\(ProfileFormat.date(first)) – \(ProfileFormat.date(last))"
     }
 
     var body: some View {
@@ -162,7 +177,7 @@ private struct MeasurementSeriesSection: View {
                 .font(.subheadline.bold())
 
             if values.count >= 2 {
-                Chart(values, id: \.date) { item in
+                Chart(values, id: \.id) { item in
                     LineMark(
                         x: .value("Fecha", item.date),
                         y: .value("Medida (\(unitLabel))", item.value)
@@ -174,10 +189,13 @@ private struct MeasurementSeriesSection: View {
                         y: .value("Medida (\(unitLabel))", item.value)
                     )
                     .foregroundStyle(ArcoColor.chart)
+                    .accessibilityLabel(ProfileFormat.date(item.date))
+                    .accessibilityValue("\(ProfileFormat.number(item.value)) \(unitLabel)")
                 }
                 .frame(height: 160)
                 .chartXAxisLabel("Fecha")
                 .chartYAxisLabel("Medida (\(unitLabel))")
+                .chartYScale(domain: .automatic(includesZero: false))
                 .chartYAxis { AxisMarks(position: .leading) }
                 .accessibilityLabel("Evolución de \(series.seriesLabel), en \(unitLabel)")
             } else {
@@ -190,24 +208,39 @@ private struct MeasurementSeriesSection: View {
                 HStack {
                     Text("Cambio absoluto")
                     Spacer()
-                    Text("\(signedDecimalString(change)) \(unitLabel)")
+                    Text("\(signedString(change)) \(unitLabel)")
                         .monospacedDigit()
                 }
                 .font(.caption)
+                .accessibilityElement(children: .combine)
                 Text(period)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
 
-            // Alternativa textual al gráfico (accesibilidad, spec §18/§12).
+            // Alternativa textual al gráfico (accesibilidad, spec §18/§12) y borrado.
             DisclosureGroup("Ver como tabla") {
                 VStack(alignment: .leading, spacing: Spacing.xs) {
                     ForEach(series.points, id: \.id) { m in
                         HStack {
-                            Text(m.date.formatted(.dateTime.day().month().year()))
+                            Text(ProfileFormat.date(m.date))
                             Spacer()
-                            Text("\(NSDecimalNumber(decimal: m.amount).stringValue) \(m.unitRaw)")
-                                .monospacedDigit()
+                            VStack(alignment: .trailing, spacing: 0) {
+                                Text("\(ProfileFormat.number(converted(m), maxDecimals: 2)) \(unitLabel)")
+                                    .monospacedDigit()
+                                if m.unitRaw != displayUnit.rawValue {
+                                    Text("registrado: \(ProfileFormat.number(m.amount, maxDecimals: 2)) \(m.unitRaw)")
+                                        .font(.caption2).foregroundStyle(.secondary)
+                                }
+                            }
+                            Button(role: .destructive) {
+                                pendingDelete = m
+                            } label: {
+                                Image(systemName: "trash")
+                                    .frame(minWidth: 44, minHeight: 44)
+                            }
+                            .buttonStyle(.borderless)
+                            .accessibilityLabel("Borrar medida del \(ProfileFormat.date(m.date))")
                         }
                         .font(.caption)
                     }
@@ -216,10 +249,23 @@ private struct MeasurementSeriesSection: View {
             }
             .font(.caption)
         }
+        .confirmationDialog(
+            "¿Borrar esta medida?",
+            isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Borrar", role: .destructive) {
+                if let m = pendingDelete { onDelete(m) }
+                pendingDelete = nil
+            }
+            Button("Cancelar", role: .cancel) { pendingDelete = nil }
+        } message: {
+            Text("Se elimina solo este registro; el resto del historial se conserva.")
+        }
     }
 
-    private func signedDecimalString(_ value: Decimal) -> String {
-        let s = NSDecimalNumber(decimal: value).stringValue
+    private func signedString(_ value: Decimal) -> String {
+        let s = ProfileFormat.number(value, maxDecimals: 2)
         return value > 0 ? "+\(s)" : s
     }
 }
@@ -238,6 +284,7 @@ struct AddBodyMeasurementView: View {
     @State private var amountText = ""
     @State private var protocolNote = ""
     @State private var date = Date()
+    @State private var showValidation = false
 
     private var resolvedTypeKey: String? {
         if selectedType == .custom {
@@ -248,8 +295,11 @@ struct AddBodyMeasurementView: View {
         return selectedType.typeKey
     }
 
+    /// Valor > 0 (spec §7): vacío, 0, negativos y textos ambiguos se rechazan.
+    private var outcome: BodyValueValidation.Outcome { BodyValueValidation.validate(amountText) }
+
     private var canSave: Bool {
-        resolvedTypeKey != nil && DecimalParser(locale: .current).parse(amountText) != nil
+        resolvedTypeKey != nil && outcome != .empty
     }
 
     var body: some View {
@@ -271,7 +321,7 @@ struct AddBodyMeasurementView: View {
                     }
                 }
 
-                Section("Valor") {
+                Section {
                     HStack {
                         TextField("Medida", text: $amountText)
                             .keyboardType(.decimalPad)
@@ -279,6 +329,12 @@ struct AddBodyMeasurementView: View {
                             .foregroundStyle(.secondary)
                     }
                     DatePicker("Fecha", selection: $date, in: ...Date(), displayedComponents: .date)
+                } header: {
+                    Text("Valor")
+                } footer: {
+                    if showValidation, let message = BodyValueValidation.message(for: outcome) {
+                        Text(message).foregroundStyle(.red)
+                    }
                 }
 
                 Section("Protocolo") {
@@ -304,8 +360,8 @@ struct AddBodyMeasurementView: View {
     }
 
     private func save() {
-        guard let typeKey = resolvedTypeKey,
-              let amount = DecimalParser(locale: .current).parse(amountText) else { return }
+        guard let typeKey = resolvedTypeKey else { return }
+        guard case .valid(let amount) = outcome else { showValidation = true; return }
         let effectiveSide: BodySide = selectedType.supportsSides ? side : .bilateral
         appState.context.insert(BodyMeasurementModel(
             typeKey: typeKey,
@@ -313,7 +369,7 @@ struct AddBodyMeasurementView: View {
             protocolNote: protocolNote.trimmingCharacters(in: .whitespacesAndNewlines),
             amount: amount,
             unitRaw: appState.settings.lengthUnit.rawValue,
-            date: date
+            date: min(date, Date())
         ))
         try? appState.context.save()
         dismiss()

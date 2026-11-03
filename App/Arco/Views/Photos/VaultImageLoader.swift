@@ -78,6 +78,15 @@ actor VaultImageLoader {
         insertionOrder.removeAll(keepingCapacity: false)
     }
 
+    /// Expulsa todas las variantes (tamaños) en caché de un archivo concreto, p. ej. al
+    /// borrar la foto (T67): no debe quedar ninguna copia descifrada en memoria.
+    func evict(fileName: String) {
+        let prefix = "\(fileName)#"
+        let keys = insertionOrder.filter { $0.hasPrefix(prefix) }
+        for key in keys { cache[key] = nil }
+        insertionOrder.removeAll { $0.hasPrefix(prefix) }
+    }
+
     // MARK: - Interno
 
     private func store(_ image: UIImage, forKey key: String) {

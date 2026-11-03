@@ -1,6 +1,5 @@
 import SwiftUI
 import SwiftData
-import Charts
 import ArcoCore
 
 /// Panel de progreso (spec §12). Gráficos por ejercicio y músculo. Más llamativo que Hoy.
@@ -11,7 +10,7 @@ struct ProgressDashboardView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: Spacing.lg) {
-                    MuscleVolumeCard(sessions: sessions)
+                    MuscleWeeklyCountCard(sessions: sessions)
                     ExerciseProgressLinksCard(sessions: sessions)
                     if sessions.isEmpty {
                         ArcoCard {
@@ -32,62 +31,6 @@ struct ProgressDashboardView: View {
             .background(ArcoColor.background)
             .navigationTitle("Progreso")
         }
-    }
-}
-
-/// Conteo de series por grupo muscular en los últimos 14 días (D/I/F con etiqueta honesta).
-struct MuscleVolumeCard: View {
-    let sessions: [WorkoutSessionModel]
-
-    private var groupCounts: [MuscleGroupCount] {
-        let cutoff = Calendar.current.date(byAdding: .day, value: -14, to: Date()) ?? Date()
-        let attributed: [AttributedSet] = sessions
-            .filter { $0.trainingDate >= cutoff }
-            .flatMap { session in
-                session.exercises.flatMap { se -> [AttributedSet] in
-                    guard let rs = ExerciseCatalog.ruleSet(for: se.exerciseID) else { return [] }
-                    return se.sets
-                        .filter { $0.toDomain().isEligibleForWorkCount }
-                        .map { AttributedSet(setID: $0.id, exerciseID: se.exerciseID, side: $0.toDomain().side, ruleSet: rs) }
-                }
-            }
-        return MuscleCounter.countByGroup(attributed)
-            .values
-            .sorted { $0.fractional > $1.fractional }
-    }
-
-    var body: some View {
-        ArcoCard {
-            VStack(alignment: .leading, spacing: Spacing.md) {
-                Text("Series por grupo · últimos 14 días")
-                    .font(.headline)
-                if groupCounts.isEmpty {
-                    Text("Sin datos en este periodo.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                } else {
-                    Chart(groupCounts, id: \.group) { item in
-                        BarMark(
-                            x: .value("Series (fraccional)", item.fractional),
-                            y: .value("Grupo", groupLabel(item.group))
-                        )
-                        .foregroundStyle(ArcoColor.chart)
-                    }
-                    .frame(height: CGFloat(groupCounts.count) * 32 + 20)
-                    Text("Fraccional = directas + 0,5 × indirectas. Es una convención agregada, no una garantía por ejercicio.")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
-    }
-
-    private func groupLabel(_ g: MuscleGroup) -> String {
-        [
-            MuscleGroup.chest: "Pecho", .shoulders: "Hombros", .back: "Espalda",
-            .biceps: "Bíceps", .triceps: "Tríceps", .forearm: "Antebrazo",
-            .legs: "Pierna", .core: "Abdomen"
-        ][g] ?? g.rawValue
     }
 }
 

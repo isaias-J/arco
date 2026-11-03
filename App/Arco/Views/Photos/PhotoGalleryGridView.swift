@@ -61,7 +61,8 @@ struct PhotoGalleryGridView: View {
 
     @State private var selectedPose: Pose?       // nil = todas
     @State private var period: GalleryPeriod = .all
-    @State private var showCapturePosePicker = false
+    /// Revisión fotográfica en curso (hoja). Lleva el peso inicial si viene de Perfil.
+    @State private var revisionRequest: PhotoRevisionRequest?
 
     /// Cargador compartido con caché acotada (T68). @State para vivir con la vista.
     @State private var loader = VaultImageLoader()
@@ -95,9 +96,20 @@ struct PhotoGalleryGridView: View {
         .background(ArcoColor.background)
         .navigationTitle("Bóveda")
         .toolbar { toolbarContent }
-        .sheet(isPresented: $showCapturePosePicker) {
-            CapturePosePickerView()
+        .sheet(item: $revisionRequest) { request in
+            CapturePosePickerView(initialWeightID: request.initialWeightID)
+                .vaultPrivacyScreen()
         }
+        .onAppear(perform: consumePendingWeight)
+        .onChange(of: appState.pendingPhotoWeightID) { _, _ in consumePendingWeight() }
+    }
+
+    /// Perfil guardó un peso y el usuario pulsó "Añadir foto": tras desbloquear se abre la
+    /// revisión con ese peso vinculado y la petición se limpia.
+    private func consumePendingWeight() {
+        guard let weightID = appState.pendingPhotoWeightID else { return }
+        appState.pendingPhotoWeightID = nil
+        revisionRequest = PhotoRevisionRequest(initialWeightID: weightID)
     }
 
     // MARK: Subvistas
@@ -135,7 +147,7 @@ struct PhotoGalleryGridView: View {
         } description: {
             Text("Toma una foto de progreso o ajusta el filtro de pose y periodo.")
         } actions: {
-            Button("Tomar foto") { showCapturePosePicker = true }
+            Button("Tomar fotos") { revisionRequest = PhotoRevisionRequest() }
                 .buttonStyle(.borderedProminent)
         }
         .padding(.top, Spacing.xxl)
@@ -145,9 +157,9 @@ struct PhotoGalleryGridView: View {
     private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .primaryAction) {
             Button {
-                showCapturePosePicker = true
+                revisionRequest = PhotoRevisionRequest()
             } label: {
-                Label("Tomar foto", systemImage: "camera")
+                Label("Tomar fotos", systemImage: "camera")
             }
         }
         ToolbarItemGroup(placement: .secondaryAction) {
@@ -160,6 +172,11 @@ struct PhotoGalleryGridView: View {
                 PhotoTimelapseView(checkIns: filtered, loader: loader, weights: weights)
             } label: {
                 Label("Secuencia", systemImage: "play.rectangle")
+            }
+            NavigationLink {
+                VaultSettingsView()
+            } label: {
+                Label("Ajustes de la bóveda", systemImage: "gearshape")
             }
         }
     }
@@ -279,14 +296,35 @@ struct PhotoThumbnailCell: View {
 // MARK: - Detalle de un check-in
 
 /// Detalle de un check-in: imagen a tamaño de pantalla, fecha absoluta, tiempo
-/// transcurrido, pose y peso asociado con su tipo (spec §16).
+/// transcurrido, pose y peso asociado con su tipo (spec §16). Permite borrar la foto (T67).
+///
+/// La vista trabaja con una instantánea de valores (no lee el modelo en `body`) para que
+/// borrar el registro no deje la vista leyendo un modelo eliminado.
 struct PhotoDetailView: View {
-    let checkIn: PhotoCheckInModel
+    private let photoID: UUID
+    private let fileName: String
+    private let pose: Pose
+    private let date: Date
+    private let weightText: String?
     let loader: VaultImageLoader
-    let weight: BodyWeightModel?
 
+    init(checkIn: PhotoCheckInModel, loader: VaultImageLoader, weight: BodyWeightModel?) {
+        self.photoID = checkIn.id
+        self.fileName = checkIn.encryptedFileName
+        self.pose = Pose(rawValue: checkIn.poseRaw)
+        self.date = checkIn.date
+        self.weightText = weight.map { "\($0.photoLabel) · \($0.measurementDate.formatted(date: .abbreviated, time: .omitted))" }
+        self.loader = loader
+    }
+
+    @Environment(AppState.self) private var appState
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
     @Environment(\.displayScale) private var displayScale
     @State private var image: UIImage?
+    @State private var showDeleteConfirmation = false
+    @State private var isDeleting = false
+    @State private var deleteError: String?
 
     var body: some View {
         ScrollView {
@@ -304,105 +342,65 @@ struct PhotoDetailView: View {
                             .overlay { ProgressView() }
                     }
                 }
-                .accessibilityLabel("Foto de \(Pose(rawValue: checkIn.poseRaw).displayName)")
+                .accessibilityLabel("Foto de \(pose.displayName)")
 
                 ArcoCard {
                     VStack(alignment: .leading, spacing: Spacing.sm) {
-                        LabeledContent("Pose", value: Pose(rawValue: checkIn.poseRaw).displayName)
-                        LabeledContent("Fecha", value: checkIn.date.formatted(date: .long, time: .omitted))
-                        LabeledContent("Hace", value: relativeText)
-                        if let weight {
-                            LabeledContent("Peso") {
-                                Text(weightText(weight))
-                            }
-                        } else {
-                            LabeledContent("Peso", value: "Sin peso vinculado")
-                        }
+                        LabeledContent("Pose", value: pose.displayName)
+                        LabeledContent("Fecha", value: date.formatted(date: .long, time: .omitted))
+                        LabeledContent("Hace", value: date.formatted(.relative(presentation: .named)))
+                        LabeledContent("Peso", value: weightText ?? "Sin peso vinculado")
                     }
+                }
+
+                Button(role: .destructive) {
+                    showDeleteConfirmation = true
+                } label: {
+                    Label("Eliminar foto", systemImage: "trash")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .disabled(isDeleting)
+
+                if let deleteError {
+                    Text(deleteError).font(.footnote).foregroundStyle(.red)
                 }
             }
             .padding(Spacing.lg)
         }
         .background(ArcoColor.background)
-        .navigationTitle(Pose(rawValue: checkIn.poseRaw).displayName)
+        .navigationTitle(pose.displayName)
         .navigationBarTitleDisplayMode(.inline)
-        .task(id: checkIn.id) {
+        .task(id: photoID) {
             let maxPixel = 1200 * displayScale
-            self.image = await loader.image(fileName: checkIn.encryptedFileName, maxPixel: maxPixel)
+            self.image = await loader.image(fileName: fileName, maxPixel: maxPixel)
+        }
+        .confirmationDialog("¿Eliminar esta foto?", isPresented: $showDeleteConfirmation, titleVisibility: .visible) {
+            Button("Eliminar foto", role: .destructive) {
+                Task { await deletePhoto() }
+            }
+            Button("Cancelar", role: .cancel) {}
+        } message: {
+            Text("Se borra la imagen cifrada y sus derivados de este dispositivo. El peso vinculado se conserva. Las copias exportadas que ya tengas no se borran.")
         }
     }
 
-    private var relativeText: String {
-        checkIn.date.formatted(.relative(presentation: .named))
-    }
-
-    private func weightText(_ w: BodyWeightModel) -> String {
-        let kind = w.isEstimated ? "estimado" : "medido"
-        return "\(w.amount) \(w.unitRaw) · \(kind)"
-    }
-}
-
-// MARK: - Selector de pose para capturar
-
-/// Hoja para elegir qué pose capturar antes de abrir la cámara (spec §16: el
-/// flujo permite una sola pose o varias; no obliga a completar todas).
-struct CapturePosePickerView: View {
-    @Environment(\.dismiss) private var dismiss
-    @State private var customName = ""
-
-    var body: some View {
-        NavigationStack {
-            List {
-                Section("Poses base") {
-                    ForEach(Pose.base, id: \.id) { pose in
-                        poseRow(pose)
-                    }
-                }
-                Section("Poses opcionales") {
-                    ForEach(Pose.optional, id: \.id) { pose in
-                        poseRow(pose)
-                    }
-                }
-                Section("Pose personalizada") {
-                    TextField("Nombre de la pose", text: $customName)
-                    if !customName.trimmingCharacters(in: .whitespaces).isEmpty {
-                        NavigationLink {
-                            CameraCaptureView(pose: .custom(customName), bodyWeightID: nil) {
-                                dismiss()
-                            }
-                        } label: {
-                            Label("Capturar «\(customName)»", systemImage: "camera")
-                        }
-                    }
-                }
-            }
-            .navigationTitle("Elegir pose")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cerrar") { dismiss() }
-                }
-            }
+    private func deletePhoto() async {
+        isDeleting = true
+        defer { isDeleting = false }
+        do {
+            try await PhotoVaultOperations.deletePhoto(
+                id: photoID,
+                fileName: fileName,
+                crypto: appState.vaultCrypto,
+                loader: loader,
+                context: modelContext
+            )
+            image = nil
+            dismiss()
+        } catch {
+            deleteError = "No se pudo eliminar la foto. Inténtalo de nuevo."
         }
-    }
-
-    private func poseRow(_ pose: Pose) -> some View {
-        NavigationLink {
-            CameraCaptureView(pose: pose, bodyWeightID: nil) {
-                dismiss()
-            }
-        } label: {
-            HStack(spacing: Spacing.md) {
-                Image(systemName: pose.referenceSymbol)
-                    .foregroundStyle(ArcoColor.brand)
-                VStack(alignment: .leading) {
-                    Text(pose.displayName).font(.body)
-                    Text(pose.shortDescription)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
-        .accessibilityLabel("Capturar pose \(pose.displayName)")
     }
 }
 

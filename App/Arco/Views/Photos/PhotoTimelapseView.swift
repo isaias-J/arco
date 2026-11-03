@@ -110,10 +110,7 @@ struct PhotoTimelapseView: View {
             Text(item.date.formatted(date: .abbreviated, time: .omitted))
                 .font(.caption.bold())
             if let w = weight(for: item) {
-                // Texto construido explícitamente: Decimal no es interpolable en
-                // LocalizedStringKey sin warning de localización.
-                let kind = w.isEstimated ? "estimado" : "medido"
-                Text(verbatim: "\(w.amount) \(w.unitRaw) · \(kind)")
+                Text(verbatim: w.photoLabel)
                     .font(.caption2)
             }
         }

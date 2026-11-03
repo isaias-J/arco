@@ -105,6 +105,12 @@ struct RepositoryIntegrationTests {
         let completed = s.exercises[0].sets.filter { $0.stateRaw == SetState.completed.rawValue }
         #expect(completed.count == 1)
         #expect(try ctx.fetch(FetchDescriptor<SetRecordModel>()).count == 1)
+        #expect(try ctx.fetch(FetchDescriptor<AttendanceEventModel>()).count == 1)
+
+        // Deshacer la confirmación devuelve el borrador y retira la asistencia automática.
+        repo.unconfirm(draft)
+        #expect(draft.stateRaw == SetState.pending.rawValue && draft.reps == 12)
+        #expect(try ctx.fetch(FetchDescriptor<AttendanceEventModel>()).isEmpty)
     }
 
     @Test("T03: cerrar y reabrir la base en disco recupera sesión, series y borradores")

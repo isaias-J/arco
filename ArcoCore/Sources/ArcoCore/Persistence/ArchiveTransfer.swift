@@ -400,3 +400,49 @@ public struct ArchiveImporter {
         }
     }
 }
+
+/// CSV de entrenamiento (spec §19, T69): solo series, sin fotos ni datos corporales.
+@MainActor
+public enum WorkoutCSV {
+    public static func build(context: ModelContext, exerciseName: (String) -> String = ExerciseNames.localized) -> Data {
+        let sessions = ((try? context.fetch(FetchDescriptor<WorkoutSessionModel>())) ?? []).sorted { $0.startedAt < $1.startedAt }
+        let names = Dictionary(uniqueKeysWithValues: ((try? context.fetch(FetchDescriptor<ExerciseModel>())) ?? []).map { ($0.id, $0.name) })
+        let day = DateFormatter()
+        day.calendar = Calendar(identifier: .gregorian)
+        day.locale = Locale(identifier: "en_US_POSIX")
+        day.dateFormat = "yyyy-MM-dd"
+        var rows: [CSVExport.Row] = []
+        for s in sessions {
+            day.timeZone = TimeZone(identifier: s.originTimeZoneID) ?? .current
+            for e in s.exercises.sorted(by: { $0.order < $1.order }) {
+                for set in WorkoutRepository.workOrder(e.sets) where set.stateRaw != SetState.pending.rawValue {
+                    let d = set.toDomain()
+                    rows.append(CSVExport.Row(
+                        setID: set.id.uuidString,
+                        sessionID: s.id.uuidString,
+                        trainingDate: day.string(from: s.trainingDate),
+                        timeZone: s.originTimeZoneID,
+                        exercise: names[e.exerciseID] ?? exerciseName(e.exerciseID),
+                        variant: e.variantKey ?? "",
+                        equipment: d.load.convention.rawValue,
+                        type: set.typeRaw,
+                        state: set.stateRaw,
+                        load: d.load.amount.map { NSDecimalNumber(decimal: $0).stringValue } ?? "",
+                        unit: set.loadUnitRaw,
+                        reps: set.reps.map(String.init) ?? "",
+                        side: set.sideRaw,
+                        rir: {
+                            switch d.rir {
+                            case .exact(let v): return "\(v)"
+                            case .atLeast(let v): return "\(v)+"
+                            case .unknown: return "?"
+                            case nil: return ""
+                            }
+                        }()
+                    ))
+                }
+            }
+        }
+        return CSVExport.data(rows: rows)
+    }
+}

@@ -8,7 +8,7 @@ struct OnboardingView: View {
     @Environment(AppState.self) private var appState
 
     @State private var displayName = ""
-    @State private var birthDate = Date(timeIntervalSince1970: 0)
+    @State private var birthDate = Calendar.current.date(byAdding: .year, value: -20, to: Date()) ?? Date()
     @State private var hasBirthDate = false
     @State private var heightText = ""
     @State private var weightText = ""
@@ -27,7 +27,7 @@ struct OnboardingView: View {
                     TextField("Nombre o apodo (opcional)", text: $displayName)
                     Toggle("Indicar fecha de nacimiento", isOn: $hasBirthDate)
                     if hasBirthDate {
-                        DatePicker("Fecha de nacimiento", selection: $birthDate, in: ...Date(), displayedComponents: .date)
+                        DatePicker("Fecha de nacimiento", selection: $birthDate, in: ...Date().addingTimeInterval(-86400), displayedComponents: .date)
                     }
                 }
 
@@ -61,19 +61,56 @@ struct OnboardingView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
+
+                restoreSection
             }
             .navigationTitle("Configuración")
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Empezar", action: save)
+                        .accessibilityIdentifier("onboarding.start")
                 }
+            }
+            .alert("Revisa los datos", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
+                Button("Entendido", role: .cancel) {}
+            } message: {
+                Text(error ?? "")
             }
         }
     }
 
+    @State private var error: String?
+
+    private var restoreSection: some View {
+        Section {
+            NavigationLink("Restaurar desde una copia de Arco") { BackupView() }
+        } footer: {
+            Text("Si tienes un archivo .arcobk exportado antes, puedes recuperarlo aquí.")
+        }
+    }
+
     private func save() {
+        let decimalParser = DecimalParser(locale: .current)
+        let heightTrimmed = heightText.trimmingCharacters(in: .whitespaces)
+        let weightTrimmed = weightText.trimmingCharacters(in: .whitespaces)
+        let height = decimalParser.parse(heightTrimmed)
+        let weight = decimalParser.parse(weightTrimmed)
+        // Vacío = desconocido (válido). Escrito pero no positivo o ambiguo = error.
+        if !heightTrimmed.isEmpty && (height == nil || height! <= 0) {
+            error = "La altura debe ser un número mayor que 0 o quedar vacía."
+            return
+        }
+        if !weightTrimmed.isEmpty && (weight == nil || weight! <= 0) {
+            error = "El peso debe ser un número mayor que 0 o quedar vacío."
+            return
+        }
+        if hasBirthDate && birthDate >= Date() {
+            error = "La fecha de nacimiento debe ser una fecha pasada."
+            return
+        }
+
         let profile = UserProfileModel(
-            displayName: displayName.isEmpty ? nil : displayName,
+            displayName: displayName.trimmingCharacters(in: .whitespaces).isEmpty ? nil : displayName.trimmingCharacters(in: .whitespaces),
             birthDate: hasBirthDate ? birthDate : nil
         )
         appState.context.insert(profile)
@@ -81,12 +118,10 @@ struct OnboardingView: View {
         appState.settings.massUnitRaw = massUnit.rawValue
         appState.settings.lengthUnitRaw = lengthUnit.rawValue
 
-        // Altura y peso si se indicaron (no se inventan).
-        let decimalParser = DecimalParser(locale: .current)
-        if let h = decimalParser.parse(heightText) {
+        if let h = height {
             appState.context.insert(HeightModel(date: Date(), amount: h, unitRaw: lengthUnit.rawValue))
         }
-        if let w = decimalParser.parse(weightText) {
+        if let w = weight {
             appState.context.insert(BodyWeightModel(measurementDate: Date(), enteredAt: Date(), amount: w, unitRaw: massUnit.rawValue, isEstimated: false))
         }
 

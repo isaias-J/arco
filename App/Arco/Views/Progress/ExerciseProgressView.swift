@@ -3,14 +3,15 @@ import SwiftData
 import Charts
 import ArcoCore
 
-/// Gráfico por ejercicio (spec §12). Recibe un `exerciseID` y muestra la evolución de las
-/// series de trabajo de ESE ejercicio a lo largo del tiempo:
-/// - Mayor carga por sesión (puntos reales, sin rellenar fechas ausentes con cero — T32).
-/// - Récord de carga y récord de repeticiones a una carga (spec §13).
-/// - e1RM opcional y SECUNDARIO solo si se puede calcular (EstimatedOneRM.epley), etiquetado
-///   como estimación. Nunca se llama "1RM real" a la carga máxima (spec §12).
-/// - Historial completo de series.
-/// Periodos: semana / mes / 3 meses / año / todo (T33: la semana en curso se marca parcial).
+/// Gráfico por ejercicio y variante comparable (spec §12, §13, hallazgo 10, T25).
+///
+/// Las series se agrupan por comparabilidad = (variante del ejercicio en la sesión, convención de
+/// carga de la serie). Un selector "Variante / convención" filtra TODO (gráfica, récords,
+/// historial y e1RM) a una sola combinación: cambiar de máquina o variante produce otra serie,
+/// nunca una sola línea mezclada.
+/// - Mayor carga por sesión con puntos reales (sin ceros imputados — T32).
+/// - La asistencia nunca aparece como récord ni como "mayor carga" (T26): solo historial.
+/// - e1RM opcional y secundario (Epley con filtros conservadores); nunca "1RM real".
 struct ExerciseProgressView: View {
     let exerciseID: String
 
@@ -18,6 +19,7 @@ struct ExerciseProgressView: View {
     @Query private var sessions: [WorkoutSessionModel]
 
     @State private var period: ChartPeriod = .threeMonths
+    @State private var selectedKey: ComparableKey?
     /// Punto seleccionado en el gráfico (abre detalle de fecha/valor/series — spec §12).
     @State private var selectedDate: Date?
 
@@ -25,64 +27,85 @@ struct ExerciseProgressView: View {
         self.exerciseID = exerciseID
     }
 
-    private var calendar: Calendar {
-        var c = Calendar.current
-        // Inicio de semana: lunes por defecto, configurable desde ajustes (spec §12).
-        c.firstWeekday = appState.settings.weekStartsMonday ? 2 : c.firstWeekday
-        return c
-    }
+    private var calendar: Calendar { appState.calendar }
+    private var massUnit: MassUnit { appState.settings.massUnit }
 
-    // MARK: - Datos derivados (solo lectura de @Query, main actor)
+    // MARK: - Datos derivados
 
-    /// Sesiones que contienen al menos una serie elegible de este ejercicio, con sus series
-    /// de dominio ya convertidas (toDomain()). No se rellenan fechas ausentes (T32).
-    private var sessionsWithSets: [ExerciseSessionData] {
-        sessions
-            .compactMap { session -> ExerciseSessionData? in
-                // Series de trabajo elegibles de ESTE ejercicio en esta sesión.
-                let domainSets = session.exercises
-                    .filter { $0.exerciseID == exerciseID }
-                    .flatMap { $0.sets.map { $0.toDomain() } }
-                    .filter { $0.isEligibleForWorkCount }
-                guard !domainSets.isEmpty else { return nil }
-                return ExerciseSessionData(date: session.trainingDate, sets: domainSets)
+    /// Todas las sesiones de este ejercicio, separadas por combinación comparable.
+    private var seriesByKey: [ComparableKey: [ExerciseSessionData]] {
+        var result: [ComparableKey: [UUID: ExerciseSessionData]] = [:]
+        for session in sessions {
+            for se in session.exercises where se.exerciseID == exerciseID {
+                for model in se.sets {
+                    let set = model.toDomain()
+                    guard set.isEligibleForWorkCount else { continue }
+                    let key = ComparableKey(variantKey: se.variantKey, convention: set.load.convention)
+                    var data = result[key]?[session.id] ?? ExerciseSessionData(id: session.id, date: session.trainingDate, sets: [])
+                    data.sets.append(set)
+                    result[key, default: [:]][session.id] = data
+                }
             }
-            .sorted { $0.date < $1.date }
-    }
-
-    /// Series dentro del periodo elegido.
-    private var periodSessions: [ExerciseSessionData] {
-        guard let cutoff = period.cutoff(from: Date(), calendar: calendar) else {
-            return sessionsWithSets // "todo"
         }
-        return sessionsWithSets.filter { $0.date >= cutoff }
+        return result.mapValues { dict in
+            dict.values
+                .map { ExerciseSessionData(id: $0.id, date: $0.date, sets: $0.sets.sorted { $0.performedAt < $1.performedAt }) }
+                .sorted { $0.date < $1.date }
+        }
     }
 
-    /// Mayor carga por sesión (T32: sin ceros imputados; fechas ausentes simplemente no existen).
+    /// Combinaciones existentes, la más reciente primero.
+    private var options: [ComparableKey] {
+        let all = seriesByKey
+        return all.keys.sorted { a, b in
+            let da = all[a]?.last?.date ?? .distantPast
+            let db = all[b]?.last?.date ?? .distantPast
+            return da == db ? a.id < b.id : da > db
+        }
+    }
+
+    private var effectiveKey: ComparableKey? {
+        if let selectedKey, options.contains(selectedKey) { return selectedKey }
+        return options.first
+    }
+
+    private var unitLabel: String {
+        (effectiveKey?.convention ?? .externalTotal).unitLabel(massUnit)
+    }
+
+    private var isLifted: Bool { effectiveKey?.convention.isLiftedLoad ?? true }
+
+    /// Sesiones de la combinación elegida dentro del periodo.
+    private var periodSessions: [ExerciseSessionData] {
+        guard let key = effectiveKey, let all = seriesByKey[key] else { return [] }
+        guard let cutoff = period.cutoff(from: Date(), calendar: calendar) else { return all }
+        return all.filter { $0.date >= cutoff }
+    }
+
+    /// Mayor carga por sesión (T32: sin ceros imputados; asistencia excluida por el núcleo).
     private var maxLoadPoints: [ChartPoint] {
-        ChartAnalytics.maxLoadPerSession(periodSessions.map { (date: $0.date, sets: $0.sets) })
-            .filter { $0.value != nil } // puntos reales observados
+        guard isLifted else { return [] }
+        return ChartAnalytics.maxLoadPerSession(periodSessions.map { (date: $0.date, sets: $0.sets) })
+            .filter { $0.value != nil }
     }
 
-    /// Todas las series de trabajo elegibles del periodo (para récords e historial).
-    private var allPeriodSets: [SetRecord] {
-        periodSessions.flatMap { $0.sets }
-    }
+    private var allPeriodSets: [SetRecord] { periodSessions.flatMap(\.sets) }
 
+    /// Récord de carga: solo para cargas levantadas (nunca asistencia — T26).
     private var maxLoadRecord: PersonalRecord? {
-        RecordsEngine.maxLoadRecord(from: allPeriodSets)
+        guard isLifted else { return nil }
+        return RecordsEngine.maxLoadRecord(from: allPeriodSets.filter { $0.load.convention.isLiftedLoad })
     }
 
-    /// Récord de repeticiones a la carga del récord de carga (misma convención/lado).
     private var repsRecord: PersonalRecord? {
         guard let kg = maxLoadRecord?.loadKilograms else { return nil }
         return RecordsEngine.repsRecord(from: allPeriodSets, atKilograms: kg)
     }
 
-    /// e1RM opcional y secundario (T58): solo puntos donde epley es elegible.
-    /// Se etiqueta como estimación; la carga máxima nunca se presenta como "1RM real".
+    /// e1RM opcional y secundario: solo puntos donde Epley es elegible.
     private var e1rmPoints: [ChartPoint] {
-        periodSessions.compactMap { data -> ChartPoint? in
+        guard isLifted else { return [] }
+        return periodSessions.compactMap { data -> ChartPoint? in
             let estimates = data.sets.compactMap { set -> Decimal? in
                 guard let reps = set.reps else { return nil }
                 return EstimatedOneRM.epley(load: set.load, reps: reps, rir: set.rir)
@@ -92,27 +115,32 @@ struct ExerciseProgressView: View {
         }
     }
 
-    /// Estado del periodo en curso (T33): marca la semana actual como parcial.
-    private var weekPartialStatus: PeriodStatus {
+    /// Semana en curso parcial (T33) — relevante para el periodo "Semana".
+    private var weekIsPartial: Bool {
         let now = Date()
-        let weekStart = calendar.dateInterval(of: .weekOfYear, for: now)?.start
-            ?? calendar.startOfDay(for: now)
-        return ChartAnalytics.weekStatus(weekStart: weekStart, reference: now, calendar: calendar)
+        let weekStart = calendar.dateInterval(of: .weekOfYear, for: now)?.start ?? calendar.startOfDay(for: now)
+        return ChartAnalytics.weekStatus(weekStart: weekStart, reference: now, calendar: calendar).isPartial
     }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Spacing.lg) {
-                periodPicker
-                if maxLoadPoints.isEmpty {
-                    emptyState
+                if options.isEmpty {
+                    emptyState(title: "Sin series registradas", text: "Cuando registres series de trabajo de este ejercicio, aquí verás tu mayor carga por sesión, tus récords y el historial.")
                 } else {
-                    maxLoadCard
-                    recordsCard
-                    if !e1rmPoints.isEmpty {
-                        e1rmCard
+                    comparabilityCard
+                    periodPicker
+                    if periodSessions.isEmpty {
+                        emptyState(title: "Sin series en este periodo", text: "Elige un periodo más amplio o registra una sesión de esta variante.")
+                    } else if isLifted {
+                        maxLoadCard
+                        recordsCard
+                        if !e1rmPoints.isEmpty { e1rmCard }
+                        historyCard
+                    } else {
+                        nonLiftedNotice
+                        historyCard
                     }
-                    historyCard
                 }
             }
             .padding(Spacing.lg)
@@ -121,22 +149,21 @@ struct ExerciseProgressView: View {
         .navigationTitle(ExerciseNames.localized(exerciseID))
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: selectedPointBinding) { detail in
-            ExercisePointDetailSheet(detail: detail)
+            ExercisePointDetailSheet(detail: detail, massUnit: massUnit)
                 .presentationDetents([.medium, .large])
         }
     }
 
     // MARK: - Selección → hoja de detalle
 
-    /// Convierte la fecha seleccionada en un detalle presentable (fecha/valor/series del día).
     private var selectedPointBinding: Binding<ExercisePointDetail?> {
         Binding(
             get: {
                 guard let date = selectedDate,
-                      let data = periodSessions.first(where: { calendar.isDate($0.date, inSameDayAs: date) })
+                      let data = periodSessions.last(where: { calendar.isDate($0.date, inSameDayAs: date) })
                 else { return nil }
-                let maxKg = data.sets.compactMap { $0.load.kilograms }.max()
-                return ExercisePointDetail(date: data.date, maxKilograms: maxKg, sets: data.sets)
+                let maxKg = data.sets.filter { $0.load.convention.isLiftedLoad }.compactMap { $0.load.kilograms }.max()
+                return ExercisePointDetail(id: data.id, date: data.date, maxKilograms: maxKg, unitLabel: unitLabel, sets: data.sets)
             },
             set: { newValue in
                 if newValue == nil { selectedDate = nil }
@@ -146,6 +173,28 @@ struct ExerciseProgressView: View {
 
     // MARK: - Subvistas
 
+    private var comparabilityCard: some View {
+        ArcoCard {
+            VStack(alignment: .leading, spacing: Spacing.sm) {
+                Picker("Variante / convención", selection: Binding(
+                    get: { effectiveKey },
+                    set: { selectedKey = $0; selectedDate = nil }
+                )) {
+                    ForEach(options) { key in
+                        Text(key.label).tag(Optional(key))
+                    }
+                }
+                .pickerStyle(.menu)
+                Text("Unidad: \(unitLabel)")
+                    .font(.caption).foregroundStyle(.secondary)
+                if options.count > 1 {
+                    Text("Hay \(options.count) combinaciones de variante y convención. Se muestran por separado y no se comparan entre sí.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
     private var periodPicker: some View {
         Picker("Periodo", selection: $period) {
             ForEach(ChartPeriod.allCases) { Text($0.label).tag($0) }
@@ -154,12 +203,11 @@ struct ExerciseProgressView: View {
         .accessibilityLabel("Periodo del gráfico")
     }
 
-    private var emptyState: some View {
+    private func emptyState(title: String, text: String) -> some View {
         ArcoCard {
             VStack(spacing: Spacing.sm) {
-                Text("Sin series en este periodo")
-                    .font(.headline)
-                Text("Cuando registres series de trabajo de este ejercicio, aquí verás tu mayor carga por sesión, tus récords y el historial.")
+                Text(title).font(.headline)
+                Text(text)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
@@ -168,39 +216,59 @@ struct ExerciseProgressView: View {
         }
     }
 
+    private var nonLiftedNotice: some View {
+        ArcoCard {
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                if effectiveKey?.convention == .assistance {
+                    Label("Asistencia: más cifra = menos dificultad", systemImage: "info.circle")
+                        .font(.subheadline.bold())
+                    Text("Por eso no se calcula mayor carga ni récord de fuerza para esta convención. Solo se muestra el historial.")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    Label("Sin carga registrada", systemImage: "info.circle")
+                        .font(.subheadline.bold())
+                    Text("No hay carga que comparar; se muestra el historial de repeticiones.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
     private var maxLoadCard: some View {
         ArcoCard {
             VStack(alignment: .leading, spacing: Spacing.md) {
                 Text("Mayor carga por sesión")
                     .font(.headline)
-                Text("Carga máxima de trabajo de cada día, en kg. No es un \"1RM real\": es el peso más alto que registraste.")
+                Text("Carga de trabajo más alta de cada sesión, en \(unitLabel). Es el peso más alto que registraste, no una prueba de máximo.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
 
                 MaxLoadChart(
                     points: maxLoadPoints,
+                    massUnit: massUnit,
+                    unitLabel: unitLabel,
                     selectedDate: $selectedDate,
                     calendar: calendar
                 )
                 .frame(height: 220)
 
-                if weekPartialStatus.isPartial {
-                    Label("La semana en curso aún está incompleta.", systemImage: "clock.badge.exclamationmark")
+                if period == .week && weekIsPartial {
+                    Label("Semana en curso, incompleta", systemImage: "clock.badge.exclamationmark")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
 
-                // Alternativa textual al gráfico (accesibilidad, spec §12).
                 DisclosureGroup("Ver como tabla") {
                     VStack(alignment: .leading, spacing: Spacing.xs) {
-                        ForEach(maxLoadPoints, id: \.date) { point in
+                        ForEach(Array(maxLoadPoints.enumerated()), id: \.offset) { _, point in
                             HStack {
-                                Text(point.date.formatted(.dateTime.day().month().year()))
+                                Text(ProfileFormat.date(point.date))
                                 Spacer()
-                                Text(point.value.map { "\(decimalString($0)) kg" } ?? "—")
+                                Text(point.value.map { "\(massText($0)) \(unitLabel)" } ?? "—")
                                     .monospacedDigit()
                             }
                             .font(.caption)
+                            .accessibilityElement(children: .combine)
                         }
                     }
                     .padding(.top, Spacing.xs)
@@ -218,7 +286,7 @@ struct ExerciseProgressView: View {
                 if let rec = maxLoadRecord {
                     recordRow(
                         title: "Mayor carga",
-                        value: "\(decimalString(rec.loadKilograms)) kg × \(rec.reps) rep.",
+                        value: "\(massText(rec.loadKilograms)) \(unitLabel) × \(rec.reps) rep.",
                         date: rec.date,
                         side: rec.side
                     )
@@ -226,7 +294,7 @@ struct ExerciseProgressView: View {
                 if let reps = repsRecord {
                     recordRow(
                         title: "Más repeticiones a esa carga",
-                        value: "\(reps.reps) rep. a \(decimalString(reps.loadKilograms)) kg",
+                        value: "\(reps.reps) rep. a \(massText(reps.loadKilograms)) \(unitLabel)",
                         date: reps.date,
                         side: reps.side
                     )
@@ -236,7 +304,7 @@ struct ExerciseProgressView: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
-                Text("Los récords excluyen calentamientos, intentos y series eliminadas. Mayor asistencia no genera récord de fuerza.")
+                Text("Los récords se recalculan desde tus series: excluyen calentamientos, intentos y series eliminadas, y solo comparan esta variante y convención.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -248,23 +316,26 @@ struct ExerciseProgressView: View {
             VStack(alignment: .leading, spacing: Spacing.md) {
                 Text("Fuerza estimada (e1RM) · secundaria")
                     .font(.headline)
-                Text("Estimación con la fórmula de Epley, solo en series elegibles (RIR 0–1, 2–10 rep., carga externa). Es un índice estimado, no una medida de fuerza real; no sustituye tus registros ni invita a probar máximos.")
+                Text(effectiveKey?.convention == .machineNominal
+                     ? "Índice estimado de esta máquina con la fórmula de Epley (RIR 0–1, 2–10 rep.). No es fuerza general ni sustituye tus registros."
+                     : "Estimación con la fórmula de Epley, solo en series elegibles (RIR 0–1, 2–10 rep., carga externa). No sustituye tus registros ni invita a probar máximos.")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
 
-                E1RMChart(points: e1rmPoints)
+                E1RMChart(points: e1rmPoints, massUnit: massUnit, unitLabel: unitLabel)
                     .frame(height: 160)
 
                 DisclosureGroup("Ver como tabla") {
                     VStack(alignment: .leading, spacing: Spacing.xs) {
-                        ForEach(e1rmPoints, id: \.date) { point in
+                        ForEach(Array(e1rmPoints.enumerated()), id: \.offset) { _, point in
                             HStack {
-                                Text(point.date.formatted(.dateTime.day().month().year()))
+                                Text(ProfileFormat.date(point.date))
                                 Spacer()
-                                Text(point.value.map { "≈ \(decimalString($0)) kg" } ?? "—")
+                                Text(point.value.map { "≈ \(massText($0)) \(unitLabel)" } ?? "—")
                                     .monospacedDigit()
                             }
                             .font(.caption)
+                            .accessibilityElement(children: .combine)
                         }
                     }
                     .padding(.top, Spacing.xs)
@@ -279,8 +350,11 @@ struct ExerciseProgressView: View {
             VStack(alignment: .leading, spacing: Spacing.md) {
                 Text("Historial de series")
                     .font(.headline)
-                // Orden cronológico descendente (más reciente primero).
-                ForEach(periodSessions.reversed(), id: \.date) { data in
+                if effectiveKey?.convention == .assistance {
+                    Text("Asistencia: más cifra = menos dificultad.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                ForEach(periodSessions.reversed()) { data in
                     VStack(alignment: .leading, spacing: Spacing.xs) {
                         Text(data.date.formatted(.dateTime.weekday().day().month().year()))
                             .font(.subheadline.bold())
@@ -293,10 +367,11 @@ struct ExerciseProgressView: View {
                                     .monospacedDigit()
                             }
                             .font(.caption)
+                            .accessibilityElement(children: .combine)
                         }
                     }
                     .padding(.vertical, Spacing.xs)
-                    if data.date != periodSessions.first?.date {
+                    if data.id != periodSessions.first?.id {
                         Divider()
                     }
                 }
@@ -306,65 +381,85 @@ struct ExerciseProgressView: View {
 
     // MARK: - Helpers de presentación
 
+    private func massText(_ kilograms: Decimal) -> String {
+        ProfileFormat.number(ProfileFormat.mass(kilograms: kilograms, in: massUnit), maxDecimals: 2)
+    }
+
     private func recordRow(title: String, value: String, date: Date, side: BodySide) -> some View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.subheadline)
-                Text(date.formatted(.dateTime.day().month().year()))
+                Text(ProfileFormat.date(date))
                     .font(.caption2).foregroundStyle(.secondary)
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 2) {
                 Text(value).font(.subheadline.bold()).monospacedDigit()
                 if side != .bilateral {
-                    Text(sideLabel(side)).font(.caption2).foregroundStyle(.secondary)
+                    Text(ExerciseSideText.label(side)).font(.caption2).foregroundStyle(.secondary)
                 }
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(title): \(value), \(date.formatted(.dateTime.day().month().year()))")
+        .accessibilityLabel("\(title): \(value), \(ProfileFormat.date(date))")
     }
 
     private func setSummary(_ set: SetRecord) -> String {
         let load: String
         if let kg = set.load.kilograms {
-            load = "\(decimalString(kg)) kg"
+            load = "\(massText(kg)) \(set.load.convention.unitLabel(massUnit))"
+        } else if set.load.convention == .none {
+            load = "sin carga"
         } else {
             load = "carga desconocida"
         }
         let reps = set.reps.map { "\($0) rep." } ?? "—"
-        let side = set.side == .bilateral ? "" : " · \(sideLabel(set.side))"
+        let side = set.side == .bilateral ? "" : " · \(ExerciseSideText.label(set.side))"
         return "\(load) × \(reps)\(side)"
     }
+}
 
-    private func sideLabel(_ side: BodySide) -> String {
+// MARK: - Modelos de apoyo (UI)
+
+/// Combinación comparable: variante del ejercicio en la sesión + convención de carga (T25).
+struct ComparableKey: Hashable, Identifiable {
+    let variantKey: String?
+    let convention: LoadConvention
+
+    var id: String { "\(variantKey ?? "")|\(convention.rawValue)" }
+
+    var variantLabel: String {
+        let trimmed = (variantKey ?? "").trimmingCharacters(in: .whitespaces)
+        return trimmed.isEmpty ? "Sin variante indicada" : trimmed
+    }
+
+    var label: String { "\(variantLabel) · \(convention.displayName)" }
+}
+
+enum ExerciseSideText {
+    static func label(_ side: BodySide) -> String {
         switch side {
         case .bilateral: return "Bilateral"
         case .left: return "Izquierdo"
         case .right: return "Derecho"
         }
     }
-
-    private func decimalString(_ value: Decimal) -> String {
-        NSDecimalNumber(decimal: value).stringValue
-    }
 }
 
-// MARK: - Modelos de apoyo (UI)
-
-/// Datos de una sesión para este ejercicio (fecha civil + series de dominio elegibles).
+/// Datos de una sesión para una combinación comparable (id estable = sesión).
 private struct ExerciseSessionData: Identifiable {
+    let id: UUID
     let date: Date
-    let sets: [SetRecord]
-    var id: Date { date }
+    var sets: [SetRecord]
 }
 
 /// Detalle de un punto seleccionado del gráfico (spec §12: fecha, valor y series originales).
 struct ExercisePointDetail: Identifiable {
+    let id: UUID
     let date: Date
     let maxKilograms: Decimal?
+    let unitLabel: String
     let sets: [SetRecord]
-    var id: Date { date }
 }
 
 /// Periodos del gráfico (spec §12): semana / mes / 3 meses / año / todo.
@@ -395,44 +490,53 @@ enum ChartPeriod: String, CaseIterable, Identifiable {
 
 // MARK: - Gráficos (subvistas)
 
-/// Gráfico de mayor carga por sesión. Puntos reales + línea de conexión visual (T32:
-/// no se imputan ceros; solo se dibujan observaciones). Interpolación lineal para no
-/// inventar picos (spec §12: no sobrepasos entre datos).
+/// Gráfico de mayor carga por sesión. Puntos reales + línea de conexión visual lineal (sin
+/// sobrepasos ni ceros imputados — T32).
 private struct MaxLoadChart: View {
     let points: [ChartPoint]
+    let massUnit: MassUnit
+    let unitLabel: String
     @Binding var selectedDate: Date?
     let calendar: Calendar
 
-    private var values: [(date: Date, value: Double)] {
-        points.compactMap { p in
+    private struct Item: Identifiable {
+        let id: Int
+        let date: Date
+        let value: Double
+    }
+
+    private var items: [Item] {
+        points.enumerated().compactMap { index, p in
             guard let v = p.value else { return nil }
-            return (p.date, NSDecimalNumber(decimal: v).doubleValue)
+            return Item(id: index, date: p.date, value: NSDecimalNumber(decimal: ProfileFormat.mass(kilograms: v, in: massUnit)).doubleValue)
         }
     }
 
     var body: some View {
         Chart {
-            ForEach(values, id: \.date) { item in
+            ForEach(items) { item in
                 LineMark(
                     x: .value("Fecha", item.date),
-                    y: .value("Carga (kg)", item.value)
+                    y: .value("Carga (\(unitLabel))", item.value)
                 )
                 .interpolationMethod(.linear)
                 .foregroundStyle(ArcoColor.chart)
 
                 PointMark(
                     x: .value("Fecha", item.date),
-                    y: .value("Carga (kg)", item.value)
+                    y: .value("Carga (\(unitLabel))", item.value)
                 )
                 .foregroundStyle(ArcoColor.chart)
+                .accessibilityLabel(ProfileFormat.date(item.date))
+                .accessibilityValue("\(ProfileFormat.number(item.value, maxDecimals: 2)) \(unitLabel)")
             }
 
             if let selectedDate,
-               let selected = values.first(where: { calendar.isDate($0.date, inSameDayAs: selectedDate) }) {
+               let selected = items.last(where: { calendar.isDate($0.date, inSameDayAs: selectedDate) }) {
                 RuleMark(x: .value("Seleccionado", selected.date))
                     .foregroundStyle(.secondary)
                     .annotation(position: .top, alignment: .center) {
-                        Text("\(Int(selected.value.rounded())) kg")
+                        Text("\(ProfileFormat.number(selected.value, maxDecimals: 2)) \(unitLabel)")
                             .font(.caption2)
                             .padding(4)
                             .background(ArcoColor.surface, in: RoundedRectangle(cornerRadius: Radius.control))
@@ -440,51 +544,62 @@ private struct MaxLoadChart: View {
             }
         }
         .chartXAxisLabel("Fecha")
-        .chartYAxisLabel("Carga (kg)")
-        .chartYAxis {
-            AxisMarks(position: .leading)
-        }
+        .chartYAxisLabel("Carga (\(unitLabel))")
+        .chartYScale(domain: .automatic(includesZero: false))
+        .chartYAxis { AxisMarks(position: .leading) }
         .chartXSelection(value: $selectedDate)
-        .accessibilityLabel("Mayor carga por sesión, en kilogramos")
+        .accessibilityLabel("Mayor carga por sesión, en \(unitLabel)")
     }
 }
 
 /// Gráfico secundario de e1RM estimado (puntos reales).
 private struct E1RMChart: View {
     let points: [ChartPoint]
+    let massUnit: MassUnit
+    let unitLabel: String
 
-    private var values: [(date: Date, value: Double)] {
-        points.compactMap { p in
+    private struct Item: Identifiable {
+        let id: Int
+        let date: Date
+        let value: Double
+    }
+
+    private var items: [Item] {
+        points.enumerated().compactMap { index, p in
             guard let v = p.value else { return nil }
-            return (p.date, NSDecimalNumber(decimal: v).doubleValue)
+            return Item(id: index, date: p.date, value: NSDecimalNumber(decimal: ProfileFormat.mass(kilograms: v, in: massUnit)).doubleValue)
         }
     }
 
     var body: some View {
-        Chart(values, id: \.date) { item in
+        Chart(items) { item in
             LineMark(
                 x: .value("Fecha", item.date),
-                y: .value("e1RM estimado (kg)", item.value)
+                y: .value("e1RM estimado (\(unitLabel))", item.value)
             )
             .interpolationMethod(.linear)
             .foregroundStyle(ArcoColor.chartSecondary)
 
             PointMark(
                 x: .value("Fecha", item.date),
-                y: .value("e1RM estimado (kg)", item.value)
+                y: .value("e1RM estimado (\(unitLabel))", item.value)
             )
             .foregroundStyle(ArcoColor.chartSecondary)
+            .accessibilityLabel(ProfileFormat.date(item.date))
+            .accessibilityValue("aproximadamente \(ProfileFormat.number(item.value)) \(unitLabel)")
         }
         .chartXAxisLabel("Fecha")
-        .chartYAxisLabel("e1RM estimado (kg)")
+        .chartYAxisLabel("e1RM estimado (\(unitLabel))")
+        .chartYScale(domain: .automatic(includesZero: false))
         .chartYAxis { AxisMarks(position: .leading) }
-        .accessibilityLabel("Fuerza máxima estimada por sesión, en kilogramos. Es una estimación secundaria.")
+        .accessibilityLabel("Fuerza máxima estimada por sesión, en \(unitLabel). Es una estimación secundaria.")
     }
 }
 
 /// Hoja de detalle de un punto seleccionado (spec §12: fecha, valor y series originales).
 struct ExercisePointDetailSheet: View {
     let detail: ExercisePointDetail
+    let massUnit: MassUnit
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -493,7 +608,7 @@ struct ExercisePointDetailSheet: View {
                 Section("Sesión") {
                     LabeledContent("Fecha", value: detail.date.formatted(.dateTime.weekday().day().month().year()))
                     if let kg = detail.maxKilograms {
-                        LabeledContent("Mayor carga", value: "\(NSDecimalNumber(decimal: kg).stringValue) kg")
+                        LabeledContent("Mayor carga", value: "\(text(kg)) \(detail.unitLabel)")
                     }
                 }
                 Section("Series de ese día") {
@@ -503,6 +618,7 @@ struct ExercisePointDetailSheet: View {
                             Spacer()
                             Text(rowText(set)).monospacedDigit()
                         }
+                        .accessibilityElement(children: .combine)
                     }
                 }
             }
@@ -516,39 +632,40 @@ struct ExercisePointDetailSheet: View {
         }
     }
 
+    private func text(_ kg: Decimal) -> String {
+        ProfileFormat.number(ProfileFormat.mass(kilograms: kg, in: massUnit), maxDecimals: 2)
+    }
+
     private func rowText(_ set: SetRecord) -> String {
-        let load = set.load.kilograms.map { "\(NSDecimalNumber(decimal: $0).stringValue) kg" } ?? "desconocida"
+        let load = set.load.kilograms.map { "\(text($0)) \(set.load.convention.unitLabel(massUnit))" } ?? "carga desconocida"
         let reps = set.reps.map { "\($0) rep." } ?? "—"
-        return "\(load) × \(reps)"
+        let side = set.side == .bilateral ? "" : " · \(ExerciseSideText.label(set.side))"
+        return "\(load) × \(reps)\(side)"
     }
 }
 
 // MARK: - Preview
 
 #Preview("Progreso por ejercicio") {
-    // Preview autocontenida con datos mock en memoria (spec: sin servicios vivos).
+    // Preview autocontenida con datos simulados en memoria (no son datos del propietario).
     let container = try! ModelContainer(
         for: WorkoutSessionModel.self, SessionExerciseModel.self, SetRecordModel.self, AppSettingsModel.self,
         configurations: ModelConfiguration(isStoredInMemoryOnly: true)
     )
     let context = container.mainContext
-
-    // Tres sesiones con progreso de carga en press plano.
     let calendar = Calendar.current
-    for (offset, kg) in [(-30, 60), (-20, 62.5), (-7, 65)] {
+    for (offset, kg, variant) in [(-30, 60.0, "Máquina A"), (-20, 62.5, "Máquina A"), (-7, 40.0, "Máquina B")] {
         let date = calendar.date(byAdding: .day, value: offset, to: Date())!
         let set = SetRecordModel(
-            loadAmount: Decimal(kg), loadUnitRaw: "kg", loadConventionRaw: "externalTotal",
+            loadAmount: Decimal(kg), loadUnitRaw: "kg", loadConventionRaw: "machineNominal",
             reps: 8, typeRaw: "working", stateRaw: "completed", sideRaw: "bilateral",
             rirKind: "exact", rirValue: 1, performedAt: date
         )
-        let se = SessionExerciseModel(exerciseID: "chest_flat_barbell", order: 0, sets: [set])
-        let session = WorkoutSessionModel(startedAt: date, trainingDate: date, originTimeZoneID: "UTC", exercises: [se])
-        context.insert(session)
+        let se = SessionExerciseModel(exerciseID: "chest_machine_press", variantKey: variant, order: 0, sets: [set])
+        context.insert(WorkoutSessionModel(startedAt: date, trainingDate: date, originTimeZoneID: "UTC", exercises: [se]))
     }
-
     return NavigationStack {
-        ExerciseProgressView(exerciseID: "chest_flat_barbell")
+        ExerciseProgressView(exerciseID: "chest_machine_press")
     }
     .environment(AppState(context: context))
     .modelContainer(container)

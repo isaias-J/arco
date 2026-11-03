@@ -12,8 +12,8 @@
 //    segundo plano. La cobertura VISUAL inmediata de la imagen en el selector de
 //    apps corresponde a la capa de vistas — este modificador.
 //  - Cuando `scenePhase != .active`, se superpone una vista opaca sobre cualquier
-//    contenido de la bóveda Y se llama a `vaultLock.lock()`. Así la captura del
-//    selector de apps no expone miniaturas ni fotos.
+//    contenido de la bóveda. Al pasar a `.background` se llama además a
+//    `vaultLock.lock()`. Así la captura del selector de apps no expone fotos.
 //  - Se distingue de un desbloqueo accidental: aquí solo se CUBRE y se bloquea;
 //    no se intenta autenticar durante el cambio de escena (spec §17 [A07]).
 //
@@ -38,8 +38,12 @@ struct VaultPrivacyScreen: ViewModifier {
                 }
             }
             .onChange(of: scenePhase) { _, newPhase in
-                if newPhase != .active {
-                    // Estado lógico a bloqueado en cuanto deja de estar activa.
+                // Cubrir al quedar inactiva; BLOQUEAR solo al pasar a segundo plano (o al
+                // bloquear el dispositivo). `.inactive` también llega con alertas del sistema
+                // (permiso de cámara, hoja de Face ID o del código): bloquear ahí cerraría la
+                // captura en curso o confundiría una autenticación legítima con un cambio de
+                // escena (spec §17 [A07]).
+                if newPhase == .background {
                     appState.vaultLock.lock()
                 }
             }

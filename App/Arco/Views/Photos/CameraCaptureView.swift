@@ -76,6 +76,9 @@ final class CameraController: NSObject {
     /// Cuenta atrás visible del temporizador fotográfico (0 = inactivo).
     private(set) var countdown: Int = 0
 
+    /// Evita guardar dos veces la misma captura por pulsaciones repetidas.
+    private(set) var isSaving = false
+
     // MARK: Infraestructura AVFoundation (no publicada)
 
     /// La sesión no es observable: no debe disparar invalidaciones de SwiftUI.
@@ -224,18 +227,21 @@ final class CameraController: NSObject {
     ///
     /// El cifrado y el strip de metadatos ocurren fuera del main actor; la
     /// escritura en SwiftData vuelve al main actor (skill de concurrencia, T48).
-    /// - Returns: el nombre de archivo cifrado creado, o nil si falla.
+    /// - Returns: el id del `PhotoCheckInModel` creado, o nil si falla.
     func confirmAndSave(
         pose: Pose,
         date: Date,
         crypto: VaultCrypto,
         context: ModelContext,
         bodyWeightID: UUID?
-    ) async -> Bool {
+    ) async -> UUID? {
+        guard !isSaving else { return nil }
         guard let jpeg = capturedJPEGData else {
             errorMessage = "No hay ninguna foto para guardar."
-            return false
+            return nil
         }
+        isSaving = true
+        defer { isSaving = false }
 
         let fileName = "checkin-\(UUID().uuidString).enc"
 
@@ -251,7 +257,7 @@ final class CameraController: NSObject {
 
         guard saved else {
             errorMessage = "No se pudo guardar la foto cifrada."
-            return false
+            return nil
         }
 
         // Volvemos al main actor (ya estamos en él) para tocar SwiftData.
@@ -267,13 +273,16 @@ final class CameraController: NSObject {
         do {
             try context.save()
         } catch {
+            // Sin registro no debe quedar un archivo cifrado huérfano.
+            context.delete(model)
+            try? crypto.deleteEncryptedFile(named: fileName)
             errorMessage = "No se pudo registrar la foto."
-            return false
+            return nil
         }
 
         capturedImage = nil
         capturedJPEGData = nil
-        return true
+        return model.id
     }
 }
 
@@ -391,16 +400,24 @@ struct CameraCaptureView: View {
     let pose: Pose
     /// Peso ya existente a vincular (spec §16 "Peso y foto", T49). Opcional (T50).
     var bodyWeightID: UUID?
-    /// Se invoca tras guardar correctamente, para que el llamador refresque.
-    var onSaved: () -> Void = {}
+    /// Foto anterior de la misma pose para la superposición opcional (dentro de la bóveda
+    /// desbloqueada: esta vista solo se presenta desde la galería desbloqueada, T62).
+    var previousFileName: String?
+    /// Se invoca tras guardar correctamente con el id de la foto creada.
+    var onSaved: (UUID) -> Void = { _ in }
 
+    @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.displayScale) private var displayScale
 
     @State private var controller = CameraController()
     @State private var timerSeconds = 0
-    private let crypto = VaultCrypto()
+    @State private var showOverlay = false
+    @State private var overlayImage: UIImage?
+    /// Caché mínima propia: solo la imagen de superposición.
+    @State private var overlayLoader = VaultImageLoader(maxEntries: 1)
 
     var body: some View {
         NavigationStack {
@@ -419,6 +436,10 @@ struct CameraCaptureView: View {
         }
         .task {
             await controller.start()
+        }
+        .task(id: showOverlay) {
+            guard showOverlay, overlayImage == nil, let previousFileName else { return }
+            overlayImage = await overlayLoader.image(fileName: previousFileName, maxPixel: 1200 * displayScale)
         }
         .onDisappear { controller.stop() }
         .onChange(of: scenePhase) { _, newPhase in
@@ -479,6 +500,16 @@ struct CameraCaptureView: View {
             ZStack {
                 CameraPreview(session: controller.session)
                     .ignoresSafeArea(edges: .horizontal)
+                if showOverlay, let overlayImage {
+                    // Solo guía visual en pantalla; no se incorpora a la foto guardada.
+                    Image(uiImage: overlayImage)
+                        .resizable()
+                        .scaledToFill()
+                        .opacity(0.35)
+                        .allowsHitTesting(false)
+                        .clipped()
+                        .accessibilityHidden(true)
+                }
                 GridOverlay()
                 poseReferenceBadge
                 if controller.countdown > 0 {
@@ -531,6 +562,12 @@ struct CameraCaptureView: View {
             .pickerStyle(.segmented)
             .accessibilityLabel("Temporizador fotográfico")
 
+            if previousFileName != nil {
+                Toggle("Superponer la foto anterior", isOn: $showOverlay)
+                    .foregroundStyle(.white)
+                    .tint(ArcoColor.brand)
+            }
+
             Button {
                 controller.capture(withTimer: timerSeconds)
             } label: {
@@ -573,16 +610,16 @@ struct CameraCaptureView: View {
 
                 Button {
                     Task {
-                        let ok = await controller.confirmAndSave(
+                        let savedID = await controller.confirmAndSave(
                             pose: pose,
                             date: Date(),
-                            crypto: crypto,
+                            crypto: appState.vaultCrypto,
                             context: modelContext,
                             bodyWeightID: bodyWeightID
                         )
-                        if ok {
+                        if let savedID {
                             controller.stop()
-                            onSaved()
+                            onSaved(savedID)
                             dismiss()
                         }
                     }
@@ -590,6 +627,7 @@ struct CameraCaptureView: View {
                     Label("Guardar", systemImage: "checkmark")
                 }
                 .buttonStyle(.borderedProminent)
+                .disabled(controller.isSaving)
             }
             .padding(.bottom, Spacing.xl)
         }
@@ -603,6 +641,11 @@ struct CameraCaptureView: View {
 #Preview("Captura — pose frontal") {
     // Preview autocontenida: no arranca cámara real en el canvas, muestra el
     // andamiaje de navegación/controles con datos mock.
+    let container = try! ModelContainer(
+        for: PhotoCheckInModel.self, BodyWeightModel.self, AppSettingsModel.self,
+        configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+    )
     CameraCaptureView(pose: .frontRelaxed, bodyWeightID: nil)
-        .modelContainer(for: PhotoCheckInModel.self, inMemory: true)
+        .modelContainer(container)
+        .environment(AppState(context: ModelContext(container)))
 }

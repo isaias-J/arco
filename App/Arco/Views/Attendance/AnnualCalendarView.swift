@@ -17,6 +17,7 @@ struct AnnualCalendarView: View {
     @Query private var events: [AttendanceEventModel]
     @Query private var sessions: [WorkoutSessionModel]
     @Query private var templates: [RoutineTemplateModel]
+    @Query private var resolutions: [AttendanceResolutionModel]
 
     @State private var year: Int
     @State private var layout: CalendarLayout = .year
@@ -27,12 +28,8 @@ struct AnnualCalendarView: View {
         _year = State(initialValue: year ?? Calendar.current.component(.year, from: Date()))
     }
 
-    /// Calendario con semana que empieza en lunes por defecto (configurable, spec §14).
-    private var calendar: Calendar {
-        var c = Calendar.current
-        c.firstWeekday = appState.settings.weekStartsMonday ? 2 : c.firstWeekday
-        return c
-    }
+    /// Calendario de la app (semana desde lunes por defecto, configurable — spec §14).
+    private var calendar: Calendar { appState.calendar }
 
     // MARK: - Modelo de días
 
@@ -59,17 +56,6 @@ struct AnnualCalendarView: View {
             if count > 0 { map[day, default: 0] += count }
         }
         return map
-    }
-
-    /// Días de descanso planificados según la rutina vigente (weekday → isRestDay).
-    /// weekday del modelo: 1=lunes … 7=domingo.
-    private var restWeekdays: Set<Int> {
-        Set(templates.filter { $0.isRestDay }.map { $0.weekday })
-    }
-
-    /// Días con plan de entrenamiento (weekday no marcado como descanso y presente en plantillas).
-    private var plannedWeekdays: Set<Int> {
-        Set(templates.filter { !$0.isRestDay }.map { $0.weekday })
     }
 
     /// Máximo de series en el año (para escalar la intensidad del modo "series").
@@ -210,35 +196,25 @@ struct AnnualCalendarView: View {
 
     // MARK: - Cálculo de estado por día
 
-    /// Determina el estado de un día (spec §14). No inventa ausencia por falta de datos;
-    /// los días futuros son `.future`.
+    /// Determina el estado de un día con la regla compartida y probada del núcleo
+    /// (`CalendarStateResolver`, spec §14): plan semanal con la convención única de weekday,
+    /// resoluciones guardadas ("Hoy descansé") y sin ausencias inventadas por falta de datos.
     private func dayInfo(for date: Date) -> DayCellInfo {
         let day = calendar.startOfDay(for: date)
-        let today = calendar.startOfDay(for: Date())
-        let weekday = modelWeekday(for: day)
+        let civil = CivilDay(day, calendar: calendar)
         let attendance = attendanceByDay[day]
         let workSets = workSetsByDay[day] ?? 0
+        let sources = attendance?.sources ?? []
 
-        let state: CalendarDayState
-        if day > today {
-            state = .future
-        } else if let attendance {
-            if attendance.sources.contains(.automatic) {
-                state = .trainedRegistered
-            } else {
-                state = .manualAttendance
-            }
-        } else if restWeekdays.contains(weekday) {
-            // Descanso planificado por la rutina vigente. (El descanso puntual confirmado
-            // requeriría un modelo de resolución; en esta versión mostramos el plan.)
-            state = .plannedRest
-        } else if plannedWeekdays.contains(weekday) {
-            // Planificado sin registro, sin confirmar (NO se marca ausencia automática, spec §14).
-            state = .plannedUnconfirmed
-        } else {
-            // Sin plan ni registro: no se afirma ausencia.
-            state = .plannedUnconfirmed
-        }
+        let state = CalendarStateResolver.state(
+            of: civil,
+            plan: WeeklyPlan(templates: templates),
+            today: CivilDay(Date(), calendar: calendar),
+            calendar: calendar,
+            automaticDays: sources.contains(.automatic) ? [civil] : [],
+            manualDays: sources.contains(.manual) ? [civil] : [],
+            resolutions: resolutionsByDay
+        )
 
         return DayCellInfo(
             date: day,
@@ -246,15 +222,16 @@ struct AnnualCalendarView: View {
             sessionCount: attendance?.sessionCount ?? 0,
             isPartial: attendance?.isPartial ?? false,
             workSetCount: workSets,
-            sources: attendance?.sources ?? []
+            sources: sources
         )
     }
 
-    /// Convierte el weekday de Calendar (1=domingo…7=sábado por Gregorian) al del modelo
-    /// (1=lunes…7=domingo).
-    private func modelWeekday(for date: Date) -> Int {
-        let gregorian = calendar.component(.weekday, from: date) // 1=domingo … 7=sábado
-        return gregorian == 1 ? 7 : gregorian - 1
+    private var resolutionsByDay: [CivilDay: AttendanceResolutionKind] {
+        var map: [CivilDay: AttendanceResolutionKind] = [:]
+        for r in resolutions {
+            if let d = CivilDay(key: r.dayKey), let k = AttendanceResolutionKind(rawValue: r.kindRaw) { map[d] = k }
+        }
+        return map
     }
 
     /// Color de la celda según el modo. En "series" la intensidad escala con el recuento.
@@ -548,7 +525,7 @@ extension CalendarDayState {
     /// Estados mostrados en la leyenda (los relevantes para esta versión).
     static var legendItems: [(state: CalendarDayState, color: Color)] {
         let states: [CalendarDayState] = [
-            .trainedRegistered, .manualAttendance, .plannedRest, .plannedUnconfirmed, .future
+            .trainedRegistered, .manualAttendance, .plannedRest, .confirmedRest, .plannedUnconfirmed, .future
         ]
         return states.map { ($0, CalendarPalette.baseColor(for: $0)) }
     }
@@ -596,11 +573,11 @@ enum CalendarPalette {
     let context = container.mainContext
     let calendar = Calendar.current
 
-    // Rutina: jueves (4) y domingo (7) descanso; resto planificado.
+    // Rutina con la convención de Calendar: jueves (5) y domingo (1) descanso.
     for wd in 1...7 {
         context.insert(RoutineTemplateModel(
             id: "tpl_\(wd)", name: "Día \(wd)", weekday: wd,
-            groupsJoined: "chest", isRestDay: (wd == 4 || wd == 7)
+            groupsJoined: "chest", isRestDay: (wd == 5 || wd == 1)
         ))
     }
 
