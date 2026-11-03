@@ -1,0 +1,15 @@
+.DS_Store
+.build/
+build/
+*/.build/
+DerivedData/
+xcuserdata/
+*.xcuserstate
+
+# Imágenes de referencia de terceros: solo uso local (derechos de autor)
+ARCO_PAQUETE_PARA_CLAUDE/referencias/
+# Copias de seguridad y datos exportados de la app: nunca al repositorio
+*.arcobk
+*.store
+*.store-wal
+*.store-shm

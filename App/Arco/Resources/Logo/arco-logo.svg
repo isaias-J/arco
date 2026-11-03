@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Logo original de Arco (spec §20): símbolo basado en una curva ascendente de extremos
+     redondeados, simple y reconocible en tamaño pequeño y en monocromo. -->
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#101D2E"/>
+      <stop offset="1" stop-color="#07111F"/>
+    </linearGradient>
+    <linearGradient id="arc" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#4B8DFF"/>
+      <stop offset="1" stop-color="#59D5FF"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="230" fill="url(#bg)"/>
+  <!-- Curva ascendente (arco) con extremos redondeados. -->
+  <path d="M 220 720 C 400 720 470 560 560 440 C 650 320 740 300 820 300"
+        fill="none" stroke="url(#arc)" stroke-width="86"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Punto destacado al final de la curva, guiño a las referencias de gráfico. -->
+  <circle cx="820" cy="300" r="60" fill="#59D5FF"/>
+</svg>
