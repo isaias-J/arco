@@ -203,7 +203,7 @@ struct RepositoryIntegrationTests {
         let ctx = try memory()
         let repo = WorkoutRepository(context: ctx)
         let s = repo.startSession(trainingDate: Date(), timeZone: .current, templateID: nil, exerciseIDs: ["back_pulldown", "curl_preacher"])
-        let d = s.exercises[0].sets[0]
+        let d = s.exercises.first { $0.exerciseID == "back_pulldown" }!.sets[0]
         repo.updateDraft(d, amount: 45, unit: .kilograms, reps: 10, type: .working, side: .bilateral, rir: nil)
         try repo.confirm(d)
         let summary = repo.finish(s)

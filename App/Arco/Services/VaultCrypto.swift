@@ -32,6 +32,7 @@
 import Foundation
 import CryptoKit
 import Security
+import ArcoCore
 
 /// Errores del servicio de cifrado de la bóveda.
 ///
@@ -256,8 +257,16 @@ final class VaultCrypto: Sendable {
         }
         // No existe: generamos una clave aleatoria de 256 bits.
         let newKey = SymmetricKey(size: .bits256)
-        try storeKeyInKeychain(newKey)
-        return newKey
+        if try storeKeyInKeychain(newKey) {
+            return newKey
+        }
+        // Otra operación guardó la clave primero (carrera en la primera captura). Se usa la
+        // clave que realmente quedó en Keychain; si se devolviera la local, la foto cifrada con
+        // ella no podría descifrarse después (hallazgo 17 de la revisión).
+        guard let stored = try readKeyFromKeychain() else {
+            throw VaultCryptoError.keychainFailure(status: errSecItemNotFound)
+        }
+        return stored
     }
 
     private func readKeyFromKeychain() throws -> SymmetricKey? {
@@ -284,7 +293,9 @@ final class VaultCrypto: Sendable {
         }
     }
 
-    private func storeKeyInKeychain(_ key: SymmetricKey) throws {
+    /// Guarda la clave. Devuelve `false` si ya existía una (no se sobrescribe para no invalidar
+    /// datos ya cifrados; el llamador debe releer la clave almacenada).
+    private func storeKeyInKeychain(_ key: SymmetricKey) throws -> Bool {
         let keyData = key.withUnsafeBytes { Data($0) }
 
         var attributes = baseKeychainQuery()
@@ -299,12 +310,9 @@ final class VaultCrypto: Sendable {
 
         switch status {
         case errSecSuccess:
-            return
+            return true
         case errSecDuplicateItem:
-            // Condición de carrera poco probable: otro flujo creó la clave entre
-            // la lectura y la escritura. No sobrescribimos para no invalidar
-            // datos ya cifrados; simplemente consideramos el estado consistente.
-            return
+            return false
         default:
             // Limpiamos la copia local de la clave aunque Data no garantiza borrado
             // físico; evitamos retenerla más de lo necesario.
@@ -408,5 +416,24 @@ final class VaultCrypto: Sendable {
         } catch {
             throw VaultCryptoError.storageUnavailable
         }
+    }
+}
+
+// MARK: - Almacén de fotos para copias y restauración
+
+/// La bóveda real cumple el protocolo del núcleo: exportar lee y descifra con la clave local;
+/// restaurar vuelve a cifrar con la clave local de ESTE dispositivo.
+extension VaultCrypto: PhotoFileStore {
+    func readPhoto(named name: String) throws -> Data { try readEncryptedFile(named: name) }
+    func writePhoto(_ data: Data, named name: String) throws { try writeEncryptedFile(data, named: name) }
+    func deletePhoto(named name: String) throws { try deleteEncryptedFile(named: name) }
+    func photoExists(named name: String) -> Bool { (try? readEncryptedFileURL(named: name)) != nil }
+
+    /// URL del archivo si existe (sin descifrar).
+    func readEncryptedFileURL(named name: String) throws -> URL {
+        let base = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: false)
+        let url = base.appendingPathComponent("Vault", isDirectory: true).appendingPathComponent(name)
+        guard FileManager.default.fileExists(atPath: url.path) else { throw VaultCryptoError.corruptedData }
+        return url
     }
 }

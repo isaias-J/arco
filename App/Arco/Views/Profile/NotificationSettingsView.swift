@@ -3,50 +3,81 @@ import SwiftData
 import UserNotifications
 import ArcoCore
 
-/// Ajustes de recordatorios locales (spec §15). La app funciona si el permiso se deniega:
-/// muestra el estado real y da acceso a Ajustes del sistema (T40). Sin servidor ni APNs.
+/// Ajustes de avisos locales (spec §15). Cada día tiene su propio horario y se guarda en
+/// `ReminderRuleModel` (weekday con la convención de Calendar). La app funciona sin permiso:
+/// muestra el estado real y un acceso a Ajustes (T40).
 struct NotificationSettingsView: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.modelContext) private var context
+    @Query private var rules: [ReminderRuleModel]
     @Query private var templates: [RoutineTemplateModel]
+    @State private var pending: [String] = []
 
-    @State private var status: UNAuthorizationStatus = .notDetermined
-    @State private var trainingEnabled = false
-    @State private var trainingHour = 18
-    @State private var attendanceReviewEnabled = true
-    @State private var reviewHour = 21
+    private var plan: WeeklyPlan { WeeklyPlan(templates: templates) }
+    private var days: [Weekday] { Weekday.ordered(startingMonday: appState.settings.weekStartsMonday) }
 
     var body: some View {
         Form {
             permissionSection
-            trainingSection
-            attendanceSection
-            explanationSection
+            Section {
+                ForEach(days, id: \.self) { day in
+                    DayReminderRow(category: .training, weekday: day, isRest: plan.day(for: day)?.isRest ?? true)
+                }
+            } header: {
+                Text("Recordatorio de entrenamiento")
+            } footer: {
+                Text("Solo se avisa en días con rutina planificada y aún sin asistencia. Los descansos (jueves y domingo en tu rutina) no reciben aviso.")
+            }
+            Section {
+                ForEach(days, id: \.self) { day in
+                    DayReminderRow(category: .review, weekday: day, isRest: plan.day(for: day)?.isRest ?? true)
+                }
+            } header: {
+                Text("Revisión de asistencia")
+            } footer: {
+                Text("“¿Cómo fue tu entrenamiento de hoy?” con las acciones Sí fui, Hoy descansé y Voy más tarde. Se cancela para ese día cuando registras una serie de trabajo o confirmas asistencia o descanso. Si entrenas a la hora de la revisión o después, se mueve dos horas más tarde.")
+            }
+            Section {
+                ForEach(days, id: \.self) { day in
+                    DayReminderRow(category: .photo, weekday: day, isRest: false)
+                }
+            } header: {
+                Text("Recordatorio de fotos")
+            } footer: {
+                Text("Desactivado hasta que elijas un día y una hora.")
+            }
+            Section {
+                Text("Los avisos se programan en este dispositivo para las próximas 4 semanas y se renuevan al abrir Arco. iOS no permite comprobar condiciones cada noche: si no abres la app en ese tiempo, los avisos se detienen hasta la próxima apertura.")
+                    .font(.footnote).foregroundStyle(.secondary)
+                if appState.notificationStatus.allowsScheduling {
+                    LabeledContent("Avisos programados", value: "\(pending.count)")
+                }
+            }
         }
         .navigationTitle("Recordatorios")
-        .task { status = await appState.notifications.currentStatus() }
+        .task { await refresh() }
+        .onChange(of: rules.map { "\($0.categoryRaw)\($0.weekday ?? 0)\($0.hour)\($0.minute)\($0.enabled)" }) { _, _ in
+            Task { await refresh() }
+        }
     }
-
-    // MARK: - Secciones
 
     @ViewBuilder
     private var permissionSection: some View {
-        Section("Permiso") {
-            HStack {
-                Text("Estado")
-                Spacer()
-                Text(statusText).foregroundStyle(.secondary)
-            }
-            switch status {
+        Section("Permiso del sistema") {
+            LabeledContent("Estado", value: statusText)
+            switch appState.notificationStatus {
             case .notDetermined:
-                Button("Activar notificaciones") {
-                    Task { status = await appState.notifications.requestAuthorization() }
+                Button("Permitir avisos") {
+                    Task {
+                        _ = await appState.notifications.requestAuthorization()
+                        await refresh()
+                    }
                 }
             case .denied:
-                // T40: la app funciona; se ofrece ir a Ajustes, sin bloquear nada.
+                Text("Los avisos están desactivados en Ajustes. El resto de Arco funciona igual.")
+                    .font(.footnote).foregroundStyle(.secondary)
                 Button("Abrir Ajustes del sistema") {
-                    if let url = URL(string: UIApplication.openSettingsURLString) {
-                        UIApplication.shared.open(url)
-                    }
+                    if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
                 }
             default:
                 EmptyView()
@@ -54,89 +85,86 @@ struct NotificationSettingsView: View {
         }
     }
 
-    private var trainingSection: some View {
-        Section("Recordatorio de entrenamiento") {
-            Toggle("Recordarme entrenar", isOn: $trainingEnabled)
-            if trainingEnabled {
-                Stepper("Hora: \(trainingHour):00", value: $trainingHour, in: 5...22)
-                Text("Se programa un aviso por cada día con rutina planificada, a la hora elegida.")
-                    .font(.caption2).foregroundStyle(.secondary)
-            }
-        }
-        .onChange(of: trainingEnabled) { _, _ in applyTrainingReminders() }
-        .onChange(of: trainingHour) { _, _ in applyTrainingReminders() }
-    }
-
-    private var attendanceSection: some View {
-        Section("Revisión de asistencia") {
-            Toggle("Preguntar por la noche", isOn: $attendanceReviewEnabled)
-            if attendanceReviewEnabled {
-                Stepper("Hora: \(reviewHour):00", value: $reviewHour, in: 18...23)
-                Text("En días planificados se te preguntará \"¿Cómo fue tu entrenamiento?\". Si ya registraste series antes de esa hora, el aviso de ese día se cancela.")
-                    .font(.caption2).foregroundStyle(.secondary)
-            }
-        }
-        .onChange(of: attendanceReviewEnabled) { _, _ in applyAttendanceReviews() }
-        .onChange(of: reviewHour) { _, _ in applyAttendanceReviews() }
-    }
-
-    private var explanationSection: some View {
-        Section {
-            Text("Los recordatorios se programan y se guardan solo en este dispositivo. iOS no garantiza ejecutar comprobaciones cada noche: Arco repone los avisos pendientes cuando abres la app.")
-                .font(.caption).foregroundStyle(.secondary)
-        }
-    }
-
-    // MARK: - Lógica
-
     private var statusText: String {
-        switch status {
-        case .authorized: return "Autorizado"
-        case .denied: return "Denegado"
+        switch appState.notificationStatus {
+        case .authorized: return "Permitidos"
+        case .denied: return "Denegados"
         case .notDetermined: return "Sin decidir"
-        case .provisional: return "Provisional"
-        case .ephemeral: return "Temporal"
+        case .provisional: return "Provisionales"
+        case .ephemeral: return "Temporales"
         @unknown default: return "Desconocido"
         }
     }
 
-    private func applyTrainingReminders() {
-        // Un recordatorio semanal por cada weekday con rutina no-descanso.
-        let plannedWeekdays = templates.filter { !$0.isRestDay }.map { modelToCalendarWeekday($0.weekday) }
-        for wd in 1...7 {
-            let enabled = trainingEnabled && plannedWeekdays.contains(wd)
-            appState.notifications.scheduleTrainingReminder(weekday: wd, hour: trainingHour, minute: 0, enabled: enabled)
+    private func refresh() async {
+        await appState.refreshReminders()
+        pending = await NotificationService.pendingSummary()
+    }
+}
+
+/// Fila de un día: activar y elegir hora y minutos. Crea o actualiza la regla de ese día.
+private struct DayReminderRow: View {
+    let category: ReminderCategory
+    let weekday: Weekday
+    let isRest: Bool
+
+    @Environment(AppState.self) private var appState
+    @Environment(\.modelContext) private var context
+    @Query private var rules: [ReminderRuleModel]
+
+    private var rule: ReminderRuleModel? {
+        rules.first { $0.categoryRaw == category.rawValue && $0.weekday == weekday.rawValue }
+    }
+    /// Regla general (sin día) usada como valor por defecto, p. ej. la revisión a las 21:00.
+    private var generalRule: ReminderRuleModel? {
+        rules.first { $0.categoryRaw == category.rawValue && $0.weekday == nil }
+    }
+
+    private var enabled: Bool { rule?.enabled ?? generalRule?.enabled ?? false }
+    private var hour: Int { rule?.hour ?? generalRule?.hour ?? defaultHour }
+    private var minute: Int { rule?.minute ?? generalRule?.minute ?? 0 }
+    private var defaultHour: Int {
+        switch category {
+        case .review: return ReminderPlanner.defaultReviewHour
+        case .training: return 18
+        case .photo, .summary: return 10
         }
     }
 
-    private func applyAttendanceReviews() {
-        Task {
-            guard attendanceReviewEnabled else {
-                // Cancelar la ventana futura de revisiones si se desactiva.
-                await appState.notifications.reconcilePendingWindow(plannedDates: [], hour: reviewHour, minute: 0, timeZone: .current)
-                return
+    var body: some View {
+        if isRest && category != .photo {
+            LabeledContent(weekday.displayName, value: "Descanso planificado")
+                .foregroundStyle(.secondary)
+        } else {
+            HStack {
+                Toggle(weekday.displayName, isOn: Binding(get: { enabled }, set: { save(enabled: $0, time: time) }))
+                if enabled {
+                    DatePicker("Hora", selection: Binding(get: { time }, set: { save(enabled: true, time: $0) }), displayedComponents: .hourAndMinute)
+                        .labelsHidden()
+                }
             }
-            let dates = upcomingPlannedDates()
-            await appState.notifications.scheduleAttendanceReviews(plannedDates: dates, hour: reviewHour, minute: 0, timeZone: .current)
+            .accessibilityElement(children: .contain)
         }
     }
 
-    /// Fechas planificadas en las próximas ~8 semanas (ventana futura acotada, spec §15).
-    private func upcomingPlannedDates() -> [Date] {
-        let calendar = Calendar.current
-        let plannedWeekdays = Set(templates.filter { !$0.isRestDay }.map { modelToCalendarWeekday($0.weekday) })
-        var result: [Date] = []
-        for dayOffset in 0..<56 {
-            guard let date = calendar.date(byAdding: .day, value: dayOffset, to: Date()) else { continue }
-            if plannedWeekdays.contains(calendar.component(.weekday, from: date)) {
-                result.append(date)
-            }
-        }
-        return result
+    private var time: Date {
+        Calendar.current.date(from: DateComponents(hour: hour, minute: minute)) ?? Date()
     }
 
-    /// Modelo (1=lunes…7=domingo) → Calendar (1=domingo…7=sábado).
-    private func modelToCalendarWeekday(_ modelWeekday: Int) -> Int {
-        modelWeekday == 7 ? 1 : modelWeekday + 1
+    private func save(enabled: Bool, time: Date) {
+        let c = Calendar.current.dateComponents([.hour, .minute], from: time)
+        let model = rule ?? {
+            let m = ReminderRuleModel(categoryRaw: category.rawValue, weekday: weekday.rawValue, hour: hour, minute: minute, enabled: enabled, timeZoneID: TimeZone.current.identifier)
+            context.insert(m)
+            return m
+        }()
+        model.enabled = enabled
+        model.hour = c.hour ?? hour
+        model.minute = c.minute ?? minute
+        model.timeZoneID = TimeZone.current.identifier
+        try? context.save()
+        if enabled && appState.notificationStatus == .notDetermined {
+            Task { _ = await appState.notifications.requestAuthorization(); await appState.refreshReminders() }
+        }
     }
 }

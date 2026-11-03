@@ -1,7 +1,6 @@
 import SwiftUI
 
-/// Raíz de la app. Muestra onboarding la primera vez; después, la navegación de 5 destinos
-/// (spec §20): Hoy, Progreso, Fotos, Asistencia, Perfil.
+/// Raíz: onboarding la primera vez; después, cinco destinos (spec §20).
 struct RootView: View {
     @Environment(AppState.self) private var appState
 
@@ -19,21 +18,24 @@ struct RootView: View {
 }
 
 struct MainTabView: View {
+    @Environment(AppState.self) private var appState
+
     var body: some View {
-        TabView {
-            Tab("Hoy", systemImage: "figure.strengthtraining.traditional") {
+        @Bindable var state = appState
+        TabView(selection: $state.selectedTab) {
+            Tab("Hoy", systemImage: "figure.strengthtraining.traditional", value: AppTab.today) {
                 TodayView()
             }
-            Tab("Progreso", systemImage: "chart.line.uptrend.xyaxis") {
+            Tab("Progreso", systemImage: "chart.line.uptrend.xyaxis", value: AppTab.progress) {
                 ProgressDashboardView()
             }
-            Tab("Fotos", systemImage: "lock.rectangle.on.rectangle") {
+            Tab("Fotos", systemImage: "lock.rectangle.on.rectangle", value: AppTab.photos) {
                 PhotosView()
             }
-            Tab("Asistencia", systemImage: "calendar") {
+            Tab("Asistencia", systemImage: "calendar", value: AppTab.attendance) {
                 AttendanceView()
             }
-            Tab("Perfil", systemImage: "person.crop.circle") {
+            Tab("Perfil", systemImage: "person.crop.circle", value: AppTab.profile) {
                 ProfileView()
             }
         }
