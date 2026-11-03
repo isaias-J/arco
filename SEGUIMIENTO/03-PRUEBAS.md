@@ -1,17 +1,18 @@
 # Arco — Matriz de requisitos y criterios de aceptación
 
-Actualizada: 2026-11-02, al cierre de la revisión integral.
+Actualizada: 2026-11-03, al cierre de las etapas de `08-ETAPAS.md`.
 
 **Estados:** *no implementado* · *implementado sin probar* · *probado con datos simulados*
 (pruebas automáticas de ArcoCore con SwiftData real en memoria o en disco temporal) ·
 *probado en simulador* (recorrido XCUITest en el simulador aislado "Arco-QA") · *requiere iPhone*
 (no verificable sin el dispositivo físico) · *parcial* (lo que falta se indica).
-Ningún criterio está **probado en iPhone real** todavía.
+Ningún criterio está **probado en iPhone real** todavía. Lista para el iPhone: `09-VERIFICACION-IPHONE.md`.
 
 **Evidencia ejecutada**
-- `cd ArcoCore && swift test` → 86 pruebas, 14 suites, en verde (repetido 3 veces sin fallos).
-- `xcodebuild -scheme Arco -destination 'id=<Arco-QA>' test` → 7 recorridos de interfaz en verde.
-- Archivos: `ArcoCore/Tests/ArcoCoreTests/*.swift`, `AppUITests/ArcoFlowTests.swift`.
+- `cd ArcoCore && swift test` → 97 pruebas, 16 suites, en verde.
+- `xcodebuild -scheme Arco -destination 'id=<Arco-QA>' test` → 14 recorridos de interfaz en verde
+  (7 en `ArcoFlowTests`, 7 en `ArcoStageFlowTests`).
+- Archivos: `ArcoCore/Tests/ArcoCoreTests/*.swift`, `AppUITests/*.swift`.
 
 | Requisito | Estado | Evidencia | Prueba | Pendiente |
 |---|---|---|---|---|
@@ -27,9 +28,9 @@ Ningún criterio está **probado en iPhone real** todavía.
 | T12–T13 Pares unilaterales | probado con datos simulados | `bodyExposures` (corregido) | `ReviewRegressionTests`, `unilateralThroughRepository` | — |
 | T14–T17 Atribuciones conservadoras | probado con datos simulados | matriz v1.0 | `MuscleCounterTests` | — |
 | T18 Versión de atribución | parcial | versión guardada por serie y visible | — | no hay recálculo con otra versión (solo existe v1.0) |
-| T19 Sugerencia explicada con datos | probado con datos simulados | evidencia por región y fechas | `explanationCitesData` | ver en simulador con historial real |
+| T19 Sugerencia explicada con datos | probado en simulador | evidencia por región y fechas | `explanationCitesData`, UI `testSuggestionAfterAnteriorShoulderWork` | — |
 | T20 Sin ejercicio apto | probado con datos simulados | — | `SuggestionTests` | — |
-| T21 Rechazar sugerencia | implementado sin probar | "Mantener mi elección"; nunca edita la selección | — | — |
+| T21 Rechazar sugerencia | probado en simulador | "Mantener mi elección" oculta solo esa sugerencia y no toca la selección | UI `testSuggestionAfterAnteriorShoulderWork` | — |
 | T22 Sin historial, sin diagnóstico | probado con datos simulados | regla de concentración | `noDataNoSuggestion` | — |
 | T23–T24 Unidades y mancuernas | probado con datos simulados | convención por ejercicio | `UnitsTests`, `unilateralThroughRepository` | — |
 | T25 Máquinas/variantes separadas | probado con datos simulados | comparable = variante + convención | `prefillFromPrevious` | selector de gráfica sin prueba de interfaz |
@@ -40,7 +41,7 @@ Ningún criterio está **probado en iPhone real** todavía.
 | T36 Sesión parcial | probado con datos simulados | — | `partialSession` | — |
 | T37 Borrar serie conserva manual | probado con datos simulados | — | `attendanceConsolidation` | — |
 | T38 Jueves y domingo descanso | probado con datos simulados | convención única de día (corregido) | `seedAndWeekdays`, `restDaysSkipped`, `restResolution` | — |
-| T39 Plan histórico en adherencia | parcial | métricas separadas; sin plan no hay % | `AdherenceMetrics` | **no se guardan versiones del plan**: cambiar la rutina hoy cambia el denominador de las últimas 4 semanas |
+| T39 Plan histórico en adherencia | probado en simulador | `PlanVersionModel`; cada fecha usa la rutina vigente; antes del primer uso no hay plan | `planHistoryAdherence`, `beforeTrackingStartIsNeutral`, UI `testRoutineEditAppliesFromToday` | — |
 | T40 Notificaciones denegadas | implementado sin probar | estado real y enlace a Ajustes | — | iPhone |
 | T41 Asistencia cancela revisión del día | probado con datos simulados | planificador por fecha | `attendanceCancelsOnlyThatDay` | entrega real: iPhone |
 | T42 Acción dirigida a la fecha del aviso | probado con datos simulados | id `arco.review.AAAA-MM-DD` | `identifierRoundTrip` | acción real: iPhone |
@@ -74,3 +75,12 @@ Ningún criterio está **probado en iPhone real** todavía.
 | T76 Primera apertura sin datos demo | probado en simulador | — | UI `testFirstLaunchHasNoDemoData` | — |
 | Sin temporizador de descanso | verificado por inspección | solo el temporizador de cámara | `grep` sin coincidencias | — |
 | Copia que describe su contenido | probado en simulador | "Fotos: no" y opción desactivada con la bóveda bloqueada | UI `testBackupDescribesContentHonestly` | — |
+| §2 Fecha de inicio de entrenamiento (opcional) | probado en simulador | se pide en la configuración, se edita en Datos personales, viaja en la copia | UI `testTrainingStartAskedInOnboarding` | — |
+| §6 Catálogo: renombrar, alias, archivar sin perder historial | probado en simulador | el archivado no se ofrece al elegir; Progreso lo muestra con el nombre nuevo | `catalogEdits`, UI `testCatalogRenameAndArchive` | — |
+| §7 Incremento y peso de barra por ejercicio | probado con datos simulados | barra desconocida por defecto | `catalogEdits` | prueba de interfaz |
+| §10.4 Atribución de ejercicios personalizados | probado con datos simulados | sin regla = "pendiente", nunca crédito inventado | `customAttribution` | prueba de interfaz |
+| §3.3 Sustituir y reordenar en sesión | probado en simulador | solo sin series confirmadas; subir/bajar | `substituteAndMove`, UI `testSubstituteInSession` | — |
+| §13 Doble progresión configurable | probado en simulador | mensaje "Cumpliste tu regla…"; no cambia pesos; "Aplicar a los borradores" opcional | `doubleProgression`, UI `testDoubleProgressionMessage` | — |
+| §14 Racha (descansos neutros) | probado con datos simulados | — | `streak` | — |
+| §3.14 Resumen semanal y motivación | probado en simulador | mensajes solo con datos; semana parcial indicada | `summaryMessages`, UI `testEvidenceAndSummary` | aviso semanal real: iPhone |
+| §9 Fuentes y método | probado en simulador | E01–E07 con alcance y fecha de revisión | `EvidenceLibraryTests`, UI `testEvidenceAndSummary` | abrir enlaces (requiere red) |

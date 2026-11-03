@@ -79,7 +79,7 @@ struct StageClosureTests {
     func planHistoryAdherence() throws {
         let ctx = try inMemoryContext()
         let catalog = CatalogRepository(context: ctx)
-        catalog.ensureInitialPlanVersion()
+        catalog.ensureInitialPlanVersion(now: date(2026, 10, 1, calendar: cal), calendar: cal)
         let oct = CivilDay(year: 2026, month: 10, day: 26)      // lunes
         let octEnd = CivilDay(year: 2026, month: 11, day: 1)    // domingo
         let today = CivilDay(year: 2026, month: 11, day: 9)
@@ -102,6 +102,30 @@ struct StageClosureTests {
         // Un segundo cambio el mismo día no apila versiones.
         try catalog.updatePlan(WeeklyPlan.ownerDefault, effective: date(2026, 11, 9, 18, calendar: cal), calendar: cal)
         #expect(try ctx.fetch(FetchDescriptor<PlanVersionModel>()).count == 2)
+    }
+
+    @Test("Días anteriores al inicio del seguimiento: no cuentan como planificados ni como 'sin registro'")
+    func beforeTrackingStartIsNeutral() throws {
+        let ctx = try inMemoryContext()
+        let catalog = CatalogRepository(context: ctx)
+        // Empieza a usar Arco el martes 3 de noviembre; el lunes 2 era día de entrenamiento.
+        catalog.ensureInitialPlanVersion(now: date(2026, 11, 3, 9, calendar: cal), calendar: cal)
+        let history = catalog.planHistory()
+        let monday = CivilDay(year: 2026, month: 11, day: 2)
+        let tuesday = CivilDay(year: 2026, month: 11, day: 3)
+        let week = Constancy.adherence(history: history, from: monday, to: CivilDay(year: 2026, month: 11, day: 8), today: tuesday, attended: [], completedSessions: [], calendar: cal)
+        #expect(week.plannedDays == 1)   // solo el martes, no el lunes previo a usar la app
+        let mondayDate = try #require(monday.startDate(in: cal))
+        #expect(CalendarStateResolver.state(of: monday, plan: history.plan(on: mondayDate), today: tuesday, calendar: cal, automaticDays: [], manualDays: [], resolutions: [:]) == .notTracked)
+        #expect(Constancy.streak(history: history, today: tuesday, attended: [], restResolutions: [], calendar: cal) == 0)
+
+        // Con una sesión previa (p. ej. importada), el seguimiento empieza en esa fecha.
+        let ctx2 = try inMemoryContext()
+        let repo = WorkoutRepository(context: ctx2)
+        _ = repo.startSession(trainingDate: date(2026, 10, 20, 18, calendar: cal), timeZone: cal.timeZone, templateID: nil, exerciseIDs: [])
+        let catalog2 = CatalogRepository(context: ctx2)
+        catalog2.ensureInitialPlanVersion(now: date(2026, 11, 3, 9, calendar: cal), calendar: cal)
+        #expect(catalog2.planHistory().versions.first?.validFrom == cal.startOfDay(for: date(2026, 10, 20, calendar: cal)))
     }
 
     @Test("Racha: los descansos no la rompen; un día planificado sin asistencia sí; hoy no cuenta en contra")

@@ -35,7 +35,8 @@ struct ArchiveIntegrationTests {
         let catalog = CatalogRepository(context: ctx)
         try catalog.setProgressionRule("legs_extension", enabled: true, lower: 8, upper: 12, referenceSets: 3, increment: 5, unit: .kilograms, minimumRIR: 1)
         try catalog.setCustomAttribution("custom_hip_thrust", [.glutes: .direct])
-        try catalog.updatePlan(WeeklyPlan.ownerDefault, effective: date(2026, 11, 2), calendar: testCalendar())
+        // Rutina cambiada al día siguiente del primer entrenamiento: dos versiones de plan.
+        try catalog.updatePlan(WeeklyPlan.ownerDefault, effective: date(2026, 11, 3), calendar: testCalendar())
 
         let weight = BodyWeightModel(measurementDate: date(2026, 11, 2), enteredAt: date(2026, 11, 2), amount: 72, unitRaw: "kg", isEstimated: false)
         ctx.insert(weight)

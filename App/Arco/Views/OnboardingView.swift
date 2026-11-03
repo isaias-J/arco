@@ -10,6 +10,8 @@ struct OnboardingView: View {
     @State private var displayName = ""
     @State private var birthDate = Calendar.current.date(byAdding: .year, value: -20, to: Date()) ?? Date()
     @State private var hasBirthDate = false
+    @State private var hasTrainingStart = false
+    @State private var trainingStart = Date()
     @State private var heightText = ""
     @State private var weightText = ""
     @State private var massUnit: MassUnit = .kilograms
@@ -28,6 +30,11 @@ struct OnboardingView: View {
                     Toggle("Indicar fecha de nacimiento", isOn: $hasBirthDate)
                     if hasBirthDate {
                         DatePicker("Fecha de nacimiento", selection: $birthDate, in: ...Date().addingTimeInterval(-86400), displayedComponents: .date)
+                    }
+                    Toggle("Indicar cuándo empezaste a entrenar", isOn: $hasTrainingStart)
+                        .accessibilityIdentifier("onboarding.trainingStart")
+                    if hasTrainingStart {
+                        DatePicker("Empecé a entrenar", selection: $trainingStart, in: ...Date(), displayedComponents: .date)
                     }
                 }
 
@@ -117,6 +124,7 @@ struct OnboardingView: View {
 
         appState.settings.massUnitRaw = massUnit.rawValue
         appState.settings.lengthUnitRaw = lengthUnit.rawValue
+        Preferences.trainingStart = hasTrainingStart ? CivilDay(min(trainingStart, Date()), calendar: appState.calendar) : nil
 
         if let h = height {
             appState.context.insert(HeightModel(date: Date(), amount: h, unitRaw: lengthUnit.rawValue))

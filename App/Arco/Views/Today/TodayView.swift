@@ -6,6 +6,9 @@ import ArcoCore
 enum TodayRoute: Hashable {
     case selection
     case session(UUID)
+    case catalog
+    case exercise(String)
+    case routine
 }
 
 /// Pantalla Hoy (spec §8): fecha, rutina del plan para hoy, sesión activa si existe y acceso
@@ -15,23 +18,12 @@ struct TodayView: View {
     @Query private var templates: [RoutineTemplateModel]
     @Query(filter: #Predicate<WorkoutSessionModel> { $0.stateRaw == "active" }, sort: \WorkoutSessionModel.startedAt, order: .reverse)
     private var activeSessions: [WorkoutSessionModel]
-    @Query private var events: [AttendanceEventModel]
     @State private var path: [TodayRoute] = []
 
     /// Plantilla del día según la convención única de weekday (Calendar: 1 = domingo).
     private var todayTemplate: RoutineTemplateModel? {
         let weekday = Weekday.of(Date(), calendar: appState.calendar)
         return templates.first { $0.weekday == weekday.rawValue }
-    }
-
-    private var weekAttendance: Int {
-        let cal = appState.calendar
-        guard let week = cal.dateInterval(of: .weekOfYear, for: Date()) else { return 0 }
-        return Set(events.filter { week.contains($0.trainingDate) }.map { CivilDay($0.trainingDate, calendar: cal) }).count
-    }
-
-    private var plannedThisWeek: Int {
-        WeeklyPlan(templates: templates).trainingWeekdays.count
     }
 
     var body: some View {
@@ -55,12 +47,24 @@ struct TodayView: View {
                     } else {
                         planCard
                     }
-                    constancyCard
+                    WeeklySummaryCompactCard()
                 }
                 .padding(Spacing.lg)
             }
             .background(ArcoColor.background)
             .navigationTitle("Hoy")
+            .toolbar {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    NavigationLink(value: TodayRoute.routine) {
+                        Label("Editar rutina", systemImage: "calendar.badge.clock")
+                    }
+                    .accessibilityIdentifier("today.routine.edit")
+                    NavigationLink(value: TodayRoute.catalog) {
+                        Label("Catálogo", systemImage: "books.vertical")
+                    }
+                    .accessibilityIdentifier("today.catalog")
+                }
+            }
             .navigationDestination(for: TodayRoute.self) { route in
                 switch route {
                 case .selection:
@@ -72,6 +76,12 @@ struct TodayView: View {
                     if let session = activeSessions.first(where: { $0.id == id }) ?? fetchSession(id) {
                         SessionView(session: session)
                     }
+                case .catalog:
+                    CatalogView()
+                case .exercise(let id):
+                    ExerciseCatalogDetailView(exerciseID: id)
+                case .routine:
+                    RoutineEditorView()
                 }
             }
         }
@@ -112,20 +122,6 @@ struct TodayView: View {
                 .controlSize(.large)
                 .accessibilityIdentifier("today.start")
             }
-        }
-    }
-
-    private var constancyCard: some View {
-        ArcoCard {
-            VStack(alignment: .leading, spacing: Spacing.xs) {
-                Text("Esta semana").font(.headline)
-                Text("\(weekAttendance) de \(plannedThisWeek) días planificados con asistencia")
-                    .font(.subheadline)
-                    .monospacedDigit()
-                Text("Los descansos planificados no cuentan en contra.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            .accessibilityElement(children: .combine)
         }
     }
 }

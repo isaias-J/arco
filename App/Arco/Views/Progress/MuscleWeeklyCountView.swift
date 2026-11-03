@@ -7,20 +7,10 @@ import ArcoCore
 /// Construye las series atribuidas a partir de las sesiones (spec §10.1). Solo series de trabajo
 /// elegibles; `pairingKey` = sesión-ejercicio para emparejar lados (T12) y `performedAt` real.
 enum MuscleProgressData {
-    static func attributedSets(_ sessions: [WorkoutSessionModel]) -> [AttributedSet] {
-        sessions.flatMap { session in
-            session.exercises.flatMap { se -> [AttributedSet] in
-                guard let rules = ExerciseCatalog.ruleSet(for: se.exerciseID) else { return [] }
-                return se.sets.compactMap { model -> AttributedSet? in
-                    let set = model.toDomain()
-                    guard set.isEligibleForWorkCount else { return nil }
-                    return AttributedSet(
-                        setID: set.id, exerciseID: se.exerciseID, side: set.side, ruleSet: rules,
-                        pairingKey: se.id.uuidString, performedAt: set.performedAt
-                    )
-                }
-            }
-        }
+    /// Usa la atribución personalizada por el usuario cuando existe (spec §10.4).
+    @MainActor
+    static func attributedSets(_ sessions: [WorkoutSessionModel], context: ModelContext) -> [AttributedSet] {
+        AttributionResolver.attributedSets(sessions, custom: AttributionResolver.customRuleSets(context))
     }
 
     /// Meta vigente de un músculo en `date` (la de inicio más reciente).
@@ -52,11 +42,13 @@ struct MuscleWeeklyCountCard: View {
     let sessions: [WorkoutSessionModel]
     @Environment(AppState.self) private var appState
     @Query private var goals: [WeeklyGoalModel]
+    /// Observa la atribución personalizada para recalcular al cambiarla.
+    @Query private var customAttributions: [CustomAttributionModel]
     @State private var period: CountPeriod = .currentWeek
 
     var body: some View {
         let interval = period.interval(now: Date(), calendar: appState.calendar)
-        let sets = MuscleWeek.filter(MuscleProgressData.attributedSets(sessions), from: interval.start, to: interval.end)
+        let sets = MuscleWeek.filter(MuscleProgressData.attributedSets(sessions, context: appState.context), from: interval.start, to: interval.end)
         let counts = MuscleCounter.countByMuscle(sets)
         let groupCounts = MuscleCounter.countByGroup(sets)
 
@@ -99,6 +91,14 @@ struct MuscleWeeklyCountCard: View {
                     .font(.caption2).foregroundStyle(.secondary)
                 Text("El total de un grupo usa la unión de series (el mayor papel por serie), no la suma de sus subregiones.")
                     .font(.caption2).foregroundStyle(.secondary)
+                NavigationLink {
+                    EvidenceLibraryView()
+                } label: {
+                    Label("Fuentes y método", systemImage: "books.vertical")
+                        .font(.footnote)
+                        .frame(minHeight: 44)
+                }
+                .accessibilityIdentifier("progress.evidence")
             }
         }
     }
@@ -207,11 +207,13 @@ struct MuscleDetailView: View {
     @Environment(AppState.self) private var appState
     @Query private var sessions: [WorkoutSessionModel]
     @Query private var goals: [WeeklyGoalModel]
+    /// Observa la atribución personalizada para recalcular al cambiarla.
+    @Query private var customAttributions: [CustomAttributionModel]
     @State private var showGoalEditor = false
 
     var body: some View {
         let now = Date()
-        let all = MuscleProgressData.attributedSets(sessions)
+        let all = MuscleProgressData.attributedSets(sessions, context: appState.context)
         let interval = period.interval(now: now, calendar: appState.calendar)
         let periodSets = MuscleWeek.filter(all, from: interval.start, to: interval.end)
         let count = MuscleCounter.countByMuscle(periodSets)[muscle]
@@ -248,7 +250,7 @@ struct MuscleDetailView: View {
                 } else {
                     ForEach(contributors, id: \.exerciseID) { item in
                         HStack {
-                            Text(ExerciseNames.localized(item.exerciseID))
+                            Text(appState.exerciseName(item.exerciseID))
                             Spacer()
                             Text("\(roleLabel(item.role)) · \(item.count) \(item.count == 1 ? "exposición" : "exposiciones")")
                                 .font(.caption).foregroundStyle(.secondary)

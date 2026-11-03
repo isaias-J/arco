@@ -40,3 +40,12 @@
 ## Pendiente de decisión del propietario (no bloquea)
 - Nombre definitivo de la app (ahora "Arco", configurable).
 - Firma de código para instalar en iPhone (requiere su Apple ID / equipo en Xcode).
+
+## 2026-11-03 — Inicio del seguimiento y fecha de inicio de entrenamiento
+- La primera versión del plan rige desde el primer uso de Arco (o desde el registro más antiguo
+  si hay datos restaurados), no "desde siempre". Los días anteriores no cuentan como planificados
+  ni aparecen como "sin registro": se muestran como "Antes de usar Arco". Alternativa descartada:
+  vigencia ilimitada hacia atrás, que contaba como pendientes días en que la app no existía.
+- La fecha en que el usuario empezó a entrenar (maestro §2) se pide opcionalmente en la
+  configuración y se guarda como preferencia local que viaja en la copia. Es informativa y no
+  altera la asistencia. Alternativa descartada: un esquema v4 solo para este dato.

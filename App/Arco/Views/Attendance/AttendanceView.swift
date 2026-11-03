@@ -13,7 +13,8 @@ struct AttendanceView: View {
 
     private var calendar: Calendar { appState.calendar }
     private var today: CivilDay { CivilDay(Date(), calendar: calendar) }
-    private var plan: WeeklyPlan { WeeklyPlan(templates: templates) }
+    @Query private var planVersions: [PlanVersionModel]
+    private var plan: WeeklyPlan { history.plan(on: Date()) ?? WeeklyPlan(templates: templates) }
 
     private var attendanceDays: [AttendanceDay] {
         let tuples = events.map { (date: $0.trainingDate, source: AttendanceSource(rawValue: $0.sourceRaw) ?? .manual, partial: $0.isPartial) }
@@ -33,19 +34,29 @@ struct AttendanceView: View {
         )
     }
 
-    /// Métricas de las últimas 4 semanas con el plan vigente; los días futuros no cuentan.
+    /// Historial de la rutina: cada fecha se evalúa con el plan que regía ese día (T39).
+    private var history: PlanHistory {
+        PlanHistory(versions: planVersions.compactMap { v in
+            PlanHistory.decode(v.daysJSON).map { PlanHistory.Version(validFrom: v.validFrom, plan: $0) }
+        })
+    }
+
+    private var attendedSet: Set<CivilDay> { Set(attendanceDays.map { CivilDay($0.date, calendar: calendar) }) }
+
+    /// Métricas de las últimas 4 semanas con el plan vigente en cada fecha; los días futuros no cuentan.
     private var adherence: AdherenceMetrics {
-        let start = calendar.date(byAdding: .day, value: -27, to: calendar.startOfDay(for: Date())) ?? Date()
-        let planned = plan.plannedTrainingDates(from: start, days: 28, calendar: calendar).filter { $0 <= Date() }
-        let plannedDays = Set(planned.map { CivilDay($0, calendar: calendar) })
-        let attended = Set(attendanceDays.map { CivilDay($0.date, calendar: calendar) }).filter { $0 >= CivilDay(start, calendar: calendar) }
-        let completed = sessions.filter { $0.stateRaw == "finished" && $0.trainingDate >= start }
-            .map { CivilDay($0.trainingDate, calendar: calendar) }
-        return AdherenceMetrics(
-            attendedDays: attended.count,
-            completedSessions: Set(completed).intersection(plannedDays).count,
-            plannedDays: plannedDays.count
+        let start = today.adding(days: -27, calendar: calendar) ?? today
+        let completed = Set(sessions.filter { $0.stateRaw == "finished" }.map { CivilDay($0.trainingDate, calendar: calendar) })
+        return Constancy.adherence(
+            history: history, from: start, to: today, today: today,
+            attended: attendedSet, completedSessions: completed, calendar: calendar
         )
+    }
+
+    /// Racha de oportunidades planificadas cumplidas (spec §14).
+    private var streak: Int {
+        let restDays = Set(resolutions.filter { $0.kindRaw == AttendanceResolutionKind.rest.rawValue }.compactMap { CivilDay(key: $0.dayKey) })
+        return Constancy.streak(history: history, today: today, attended: attendedSet, restResolutions: restDays, calendar: calendar)
     }
 
     var body: some View {
@@ -78,7 +89,11 @@ struct AttendanceView: View {
                     Text("Sin días planificados en este periodo: no se calcula cumplimiento.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
-                Text("Una sesión parcial cuenta como día asistido; el cumplimiento exige finalizar la sesión. Los descansos planificados no cuentan en contra.")
+                LabeledContent("Racha actual", value: "\(streak) \(streak == 1 ? "día" : "días")")
+                    .accessibilityIdentifier("attendance.streak")
+                Text("La racha cuenta días de entrenamiento planificado cumplidos seguidos. Los descansos planificados y los confirmados no la rompen, y hoy no la rompe mientras el día no termine.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Text("Una sesión parcial cuenta como día asistido; el cumplimiento exige finalizar la sesión. Los descansos planificados no cuentan en contra. Cada fecha usa la rutina que tenía ese día.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             .monospacedDigit()

@@ -15,6 +15,7 @@ public enum CalendarDayState: String, Sendable, Equatable {
     case plannedUnconfirmed     // planificado sin registro, sin confirmar
     case confirmedAbsence       // ausencia confirmada
     case future                 // futuro
+    case notTracked             // antes de empezar a usar Arco: sin plan conocido, neutro
 }
 
 /// Un día asistido. Varias sesiones el mismo día = un día asistido (T35).

@@ -81,6 +81,7 @@ struct ProfileView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
+            .accessibilityIdentifier("profile.personal")
         }
     }
 
@@ -149,12 +150,17 @@ struct ProfileView: View {
         }
     }
 
+    @ViewBuilder
     private var linksSection: some View {
         Section("Privacidad y datos") {
             NavigationLink("Recordatorios") { NotificationSettingsView() }
             NavigationLink("Copia de seguridad") { BackupView() }
             NavigationLink("Bóveda de fotos") { VaultSettingsView() }
             NavigationLink("Privacidad") { PrivacySettingsView() }
+        }
+        Section("Información") {
+            NavigationLink("Fuentes y método") { EvidenceLibraryView() }
+                .accessibilityIdentifier("profile.evidence")
         }
     }
 

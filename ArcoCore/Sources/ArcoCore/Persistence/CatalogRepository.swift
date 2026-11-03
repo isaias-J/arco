@@ -107,20 +107,29 @@ public struct CatalogRepository {
     }
 
     /// Crea la versión inicial del plan a partir de las plantillas si aún no hay historial.
-    /// Vigente desde siempre: el plan sembrado es el que regía hasta el primer cambio.
-    public func ensureInitialPlanVersion() {
+    /// Vigente desde el inicio del seguimiento: el día más antiguo entre `now` y los registros
+    /// existentes (sesiones o asistencia). Los días anteriores no tienen plan conocido y no
+    /// cuentan como planificados: no se inventa un denominador de adherencia antes de usar Arco.
+    public func ensureInitialPlanVersion(now: Date = Date(), calendar: Calendar = .current) {
         let count = (try? context.fetchCount(FetchDescriptor<PlanVersionModel>())) ?? 0
         guard count == 0 else { return }
         let templates = (try? context.fetch(FetchDescriptor<RoutineTemplateModel>())) ?? []
         guard !templates.isEmpty else { return }
-        context.insert(PlanVersionModel(validFrom: .distantPast, daysJSON: PlanHistory.encode(WeeklyPlan(templates: templates))))
+        var start = now
+        var sessions = FetchDescriptor<WorkoutSessionModel>(sortBy: [SortDescriptor(\.trainingDate)])
+        sessions.fetchLimit = 1
+        if let first = (try? context.fetch(sessions))?.first?.trainingDate, first < start { start = first }
+        var events = FetchDescriptor<AttendanceEventModel>(sortBy: [SortDescriptor(\.trainingDate)])
+        events.fetchLimit = 1
+        if let first = (try? context.fetch(events))?.first?.trainingDate, first < start { start = first }
+        context.insert(PlanVersionModel(validFrom: calendar.startOfDay(for: start), daysJSON: PlanHistory.encode(WeeklyPlan(templates: templates))))
         try? context.save()
     }
 
     /// Cambia la rutina a partir de `effectiveDay` (normalmente hoy). Las fechas anteriores
     /// siguen evaluándose con la versión previa.
     public func updatePlan(_ plan: WeeklyPlan, effective day: Date, calendar: Calendar) throws {
-        ensureInitialPlanVersion()
+        ensureInitialPlanVersion(now: day, calendar: calendar)
         let start = calendar.startOfDay(for: day)
         let templates = (try? context.fetch(FetchDescriptor<RoutineTemplateModel>())) ?? []
         for d in plan.days {

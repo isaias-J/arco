@@ -15,15 +15,16 @@ Arco.xcodeproj          proyecto (abrir este)
 App/Arco/               app SwiftUI: vistas, servicios del sistema (cámara, avisos, Face ID, cifrado)
 ArcoCore/               paquete Swift: dominio, ciencia, analítica, modelos SwiftData, repositorios,
                         copia cifrada portable, planificador de avisos
-ArcoCore/Tests/         86 pruebas (lógica e integración con SwiftData real)
-AppUITests/             7 recorridos de interfaz (XCUITest)
-SEGUIMIENTO/            requisitos, decisiones, matriz de pruebas, pendientes, seguridad
+ArcoCore/Tests/         97 pruebas (lógica e integración con SwiftData real)
+AppUITests/             14 recorridos de interfaz (XCUITest)
+SEGUIMIENTO/            requisitos, decisiones, matriz de pruebas, pendientes, seguridad, etapas,
+                        verificaciones para el iPhone (09-VERIFICACION-IPHONE.md)
 scripts/preflight-publico.sh   revisión de seguridad antes de cada push
 ```
 
 ## 3. Compilar y probar
 ```bash
-cd ArcoCore && swift test                         # 86 pruebas, sin simulador
+cd ArcoCore && swift test                         # 97 pruebas, sin simulador
 
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 xcodebuild -project Arco.xcodeproj -scheme Arco \
@@ -61,26 +62,31 @@ Con una cuenta gratuita la instalación caduca a los 7 días.
 
 ## 6. Qué está verificado
 Detalle por criterio en `SEGUIMIENTO/03-PRUEBAS.md`.
-- **Con datos simulados (86 pruebas):** conteo muscular y pares unilaterales, atribuciones,
-  récords, gráficas sin asistencia, peso e IMC, asistencia y descansos, días de la rutina,
-  planificador de avisos (cancelación, aplazamiento, horarios por día, fechas límite), registro
-  de series con fallo de guardado, persistencia en disco, migración del esquema, exclusión de
-  copias de la base, y copia cifrada completa con fotos restaurada en una instalación limpia
-  con otra clave, con contraseña incorrecta, archivo dañado y reimportación.
-- **En el simulador aislado (7 recorridos):** primera apertura sin datos de demostración;
-  registrar una serie, cerrar la app y recuperarla; asistencia creada por la serie; "Hoy
-  descansé" persistente; validación de peso; PIN de la bóveda; pantalla de copia honesta sobre
-  las fotos; tema oscuro con texto grande.
+- **Con datos simulados (97 pruebas):** conteo muscular y pares unilaterales, atribuciones
+  (incluidas las personalizadas), récords, gráficas sin asistencia, peso e IMC, asistencia y
+  descansos, días de la rutina, historial de versiones de la rutina en la adherencia y la racha,
+  planificador de avisos (cancelación, aplazamiento, horarios por día, fechas límite), catálogo
+  (renombrar, alias, archivar, incremento y barra), sustituir y reordenar en sesión, doble
+  progresión, resumen semanal, fuentes, registro de series con fallo de guardado, persistencia en
+  disco, migraciones v1→v2→v3, exclusión de copias de la base, y copia cifrada completa con fotos
+  restaurada en una instalación limpia con otra clave, con contraseña incorrecta, archivo dañado
+  y reimportación.
+- **En el simulador aislado (14 recorridos):** primera apertura sin datos de demostración y fecha
+  de inicio opcional; registrar una serie, cerrar la app y recuperarla; asistencia creada por la
+  serie; "Hoy descansé"; validación de peso; PIN de la bóveda; copia honesta sobre las fotos; tema
+  oscuro con texto grande; sugerencia de énfasis explicada y rechazable; renombrar y archivar un
+  ejercicio conservando su historial; editar la rutina desde hoy; sustituir un ejercicio en la
+  sesión; aviso de doble progresión sin cambiar pesos; resumen semanal y fuentes.
 
 ## 7. Pendiente de comprobar en tu iPhone
-Cámara y fotos guardadas en la bóveda; varias poses con un solo pesaje; Face ID (éxito, cancelar,
-fallo); "Olvidé mi PIN" con el código del dispositivo; que el selector de apps no muestre fotos;
-entrega real de avisos y sus botones "Sí fui", "Hoy descansé" y "Voy más tarde"; exportar la copia
-a Archivos y restaurarla tras reinstalar; borrado de fotos; rendimiento con cientos de fotos;
-VoiceOver; modo avión.
+Pasos exactos y resultado esperado en `SEGUIMIENTO/09-VERIFICACION-IPHONE.md`: cámara y permiso,
+fotos fuera de Apple Fotos, varias poses con un pesaje, Face ID y "Olvidé mi PIN", selector de
+apps, entrega real de avisos y sus botones, copia a Archivos y restauración tras reinstalar,
+borrado de fotos, modo avión, VoiceOver y rendimiento con muchas fotos.
 
 ## 8. Limitaciones conocidas
-- No se guardan versiones de la rutina: cambiarla altera el cumplimiento de las últimas 4 semanas.
 - Las poses usan símbolos genéricos, no ilustraciones propias.
 - Los avisos se programan para 4 semanas; sin abrir la app en ese tiempo, se detienen.
 - Exportar con muchas fotos se hace en primer plano y puede tardar.
+- Solo existe la atribución muscular v1.0; no hay pantalla para recalcular con otra versión.
+- Los días anteriores al primer uso de Arco no cuentan para la asistencia ("Antes de usar Arco").

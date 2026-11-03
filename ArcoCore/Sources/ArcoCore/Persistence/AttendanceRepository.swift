@@ -109,9 +109,10 @@ public struct AttendanceRepository {
 
 /// Regla pura del estado de un día del calendario (spec §14).
 public enum CalendarStateResolver {
+    /// `plan` nil = fecha anterior al inicio del seguimiento: neutra, nunca "sin registro".
     public static func state(
         of day: CivilDay,
-        plan: WeeklyPlan,
+        plan: WeeklyPlan?,
         today: CivilDay,
         calendar: Calendar,
         automaticDays: Set<CivilDay>,
@@ -126,6 +127,7 @@ public enum CalendarStateResolver {
         case .absence: return .confirmedAbsence
         case nil: break
         }
+        guard let plan else { return .notTracked }
         guard let date = day.startDate(in: calendar) else { return .plannedUnconfirmed }
         if plan.isPlannedRest(date, calendar: calendar) { return .plannedRest }
         if plan.isPlannedTraining(date, calendar: calendar) { return .plannedUnconfirmed }

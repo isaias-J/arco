@@ -24,7 +24,7 @@ struct ArcoApp: App {
             // Instalación limpia de pruebas: sin PIN, sin intentos fallidos, sin fotos ni preferencias.
             PINAuth().reset()
             try? FileManager.default.removeItem(at: URL.applicationSupportDirectory.appending(path: "Vault"))
-            for key in [Preferences.rirModeKey, Preferences.useFaceIDKey, Preferences.reviewOnboardedKey] {
+            for key in [Preferences.rirModeKey, Preferences.useFaceIDKey, Preferences.reviewOnboardedKey, Preferences.trainingStartKey] {
                 UserDefaults.standard.removeObject(forKey: key)
             }
         }
@@ -49,6 +49,8 @@ struct ArcoApp: App {
                     UNUserNotificationCenter.current().delegate = NotificationCoordinator.shared
                     appState.notifications.registerCategories()
                     appState.seedDefaultReminderRulesIfNeeded()
+                    // Plan histórico (T39): versión inicial antes de calcular avisos.
+                    CatalogRepository(context: appState.context).ensureInitialPlanVersion()
                     await appState.refreshReminders()
                 }
                 .sheet(item: Binding(

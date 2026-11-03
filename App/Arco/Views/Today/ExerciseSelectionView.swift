@@ -28,32 +28,30 @@ struct ExerciseSelectionView: View {
 
     private var active: [ExerciseModel] { allExercises.filter { !$0.archived } }
 
+    private var customRules: [String: AttributionRuleSet] {
+        AttributionResolver.customRuleSets(appState.context)
+    }
+
     /// Ejercicios cuyo músculo directo pertenece a los grupos del día.
     private var dayExercises: [ExerciseModel] {
-        active.filter { model in
-            guard let rs = ExerciseCatalog.ruleSet(for: model.id) else { return false }
+        let custom = customRules
+        return active.filter { model in
+            guard let rs = AttributionResolver.ruleSet(for: model.id, custom: custom) else { return false }
             return rs.directMuscles.contains { dayGroups.contains($0.group) }
         }
     }
 
     private var recentSets: [AttributedSet] {
         let cutoff = Calendar.current.date(byAdding: .day, value: -Self.suggestionWindowDays, to: Date()) ?? Date()
-        return sessions.filter { $0.trainingDate >= cutoff }.flatMap { session in
-            session.exercises.flatMap { se -> [AttributedSet] in
-                guard let rules = ExerciseCatalog.ruleSet(for: se.exerciseID) else { return [] }
-                return se.sets.compactMap { m in
-                    let d = m.toDomain()
-                    guard d.isEligibleForWorkCount else { return nil }
-                    return AttributedSet(setID: d.id, exerciseID: se.exerciseID, side: d.side, ruleSet: rules, pairingKey: se.id.uuidString, performedAt: d.performedAt)
-                }
-            }
-        }
+        return AttributionResolver.attributedSets(sessions.filter { $0.trainingDate >= cutoff }, custom: customRules)
     }
 
     private var suggestionResult: SuggestionEngine.Result? {
         guard !dayGroups.isEmpty else { return nil }
         let definitions = active.compactMap { ExerciseCatalog.definition($0.id) }
-        return SuggestionEngine.suggest(.init(plannedGroups: dayGroups, recentSets: recentSets, availableExercises: definitions))
+        var input = SuggestionEngine.Input(plannedGroups: dayGroups, recentSets: recentSets, availableExercises: definitions)
+        input.customRuleSets = customRules
+        return SuggestionEngine.suggest(input)
     }
 
     var body: some View {
@@ -153,7 +151,7 @@ struct ExerciseSelectionView: View {
     }
 
     private func name(_ id: String) -> String {
-        allExercises.first { $0.id == id }?.name ?? ExerciseNames.localized(id)
+        allExercises.first { $0.id == id }?.name ?? appState.exerciseName(id)
     }
 
     /// Selección inicial: favorita del día, o la de la última sesión con esta plantilla.
@@ -210,6 +208,7 @@ private struct SuggestionCard: View {
                 .disabled(selected.contains(id))
             }
             Button("Mantener mi elección", action: onKeep)
+                .buttonStyle(.borderless)
                 .font(.footnote)
                 .frame(minHeight: 36)
         }
@@ -224,8 +223,11 @@ struct ExercisePickerView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
     @Query(sort: \ExerciseModel.name) private var exercises: [ExerciseModel]
+    @Query private var customAttributions: [CustomAttributionModel]
     @State private var search = ""
     @State private var showNew = false
+
+    private var customized: Set<String> { Set(customAttributions.map(\.exerciseID)) }
 
     private var filtered: [ExerciseModel] {
         exercises.filter { !$0.archived && !excluded.contains($0.id) }
@@ -241,8 +243,8 @@ struct ExercisePickerView: View {
                 } label: {
                     VStack(alignment: .leading) {
                         Text(ex.name).foregroundStyle(ArcoColor.textPrimary)
-                        if ex.originRaw == ExerciseOrigin.custom.rawValue {
-                            Text("Personalizado · atribución muscular pendiente").font(.caption).foregroundStyle(.secondary)
+                        if ex.originRaw == ExerciseOrigin.custom.rawValue && !customized.contains(ex.id) {
+                            Text("Personalizado · sin atribución muscular").font(.caption).foregroundStyle(.secondary)
                         }
                     }
                     .frame(minHeight: 44)
@@ -286,7 +288,7 @@ struct NewExerciseView: View {
                     Text("Mixto").tag(LoadType.mixed)
                 }
                 if let error { Text(error).foregroundStyle(.red).font(.footnote) }
-                Text("Los ejercicios personalizados no reciben atribución muscular automática; sus series no se suman a ningún músculo para no inventar crédito.")
+                Text("Los ejercicios personalizados no reciben atribución muscular automática; sus series no se suman a ningún músculo para no inventar crédito. Puedes asignarla después desde Catálogo.")
                     .font(.footnote).foregroundStyle(.secondary)
             }
             .navigationTitle("Nuevo ejercicio")

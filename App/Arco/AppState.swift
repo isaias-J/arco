@@ -25,18 +25,31 @@ enum Preferences {
     static let rirModeKey = "arco.rirMode"
     static let useFaceIDKey = "arco.useFaceID"
     static let reviewOnboardedKey = "arco.reviewRulesSeeded"
+    /// Fecha civil ("yyyy-MM-dd") en que el usuario dice haber empezado a entrenar (spec §2).
+    /// Opcional: si no la indica, queda desconocida. No altera la asistencia ni la adherencia.
+    static let trainingStartKey = "arco.trainingStartDay"
+
+    private static let exported = [rirModeKey, useFaceIDKey, trainingStartKey]
 
     static var all: [String: String] {
         var out: [String: String] = [:]
-        for key in [rirModeKey, useFaceIDKey] {
+        for key in exported {
             if let v = UserDefaults.standard.string(forKey: key) { out[key] = v }
         }
         return out
     }
 
     static func restore(_ values: [String: String]) {
-        for (k, v) in values where [rirModeKey, useFaceIDKey].contains(k) {
+        for (k, v) in values where exported.contains(k) {
             UserDefaults.standard.set(v, forKey: k)
+        }
+    }
+
+    static var trainingStart: CivilDay? {
+        get { UserDefaults.standard.string(forKey: trainingStartKey).flatMap(CivilDay.init(key:)) }
+        set {
+            if let newValue { UserDefaults.standard.set(newValue.key, forKey: trainingStartKey) }
+            else { UserDefaults.standard.removeObject(forKey: trainingStartKey) }
         }
     }
 }
@@ -100,6 +113,20 @@ final class AppState {
     var attendance: AttendanceRepository { AttendanceRepository(context: context, calendar: calendar) }
 
     var weeklyPlan: WeeklyPlan { PersistenceController.weeklyPlan(context) }
+
+    var catalog: CatalogRepository { CatalogRepository(context: context) }
+
+    /// Historial de versiones del plan (spec §14, T39).
+    var planHistory: PlanHistory { catalog.planHistory() }
+
+    /// Nombre mostrado de un ejercicio: el guardado (renombrable, spec §6) o el del catálogo.
+    func exerciseName(_ id: String) -> String {
+        let predicate = #Predicate<ExerciseModel> { $0.id == id }
+        if let name = (try? context.fetch(FetchDescriptor(predicate: predicate)))?.first?.name, !name.isEmpty {
+            return name
+        }
+        return ExerciseNames.localized(id)
+    }
 
     var rirMode: RIRMode {
         get { RIRMode(rawValue: UserDefaults.standard.string(forKey: Preferences.rirModeKey) ?? "") ?? .off }

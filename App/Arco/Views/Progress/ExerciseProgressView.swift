@@ -146,7 +146,7 @@ struct ExerciseProgressView: View {
             .padding(Spacing.lg)
         }
         .background(ArcoColor.background)
-        .navigationTitle(ExerciseNames.localized(exerciseID))
+        .navigationTitle(appState.exerciseName(exerciseID))
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: selectedPointBinding) { detail in
             ExercisePointDetailSheet(detail: detail, massUnit: massUnit)

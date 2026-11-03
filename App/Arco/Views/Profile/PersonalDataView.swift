@@ -13,6 +13,8 @@ struct PersonalDataView: View {
     @State private var displayName = ""
     @State private var hasBirthDate = false
     @State private var birthDate = Date()
+    @State private var hasTrainingStart = false
+    @State private var trainingStart = Date()
     @State private var experience = ""
     @State private var goalDescription = ""
     @State private var gender = ""
@@ -24,6 +26,13 @@ struct PersonalDataView: View {
     private var derivedAge: Int? {
         guard hasBirthDate else { return nil }
         return AgeCalculator.age(birthDate: birthDate, on: Date(), calendar: appState.calendar)
+    }
+
+    private var trainingWeeks: Int? {
+        guard hasTrainingStart else { return nil }
+        let cal = appState.calendar
+        let days = cal.dateComponents([.day], from: cal.startOfDay(for: trainingStart), to: cal.startOfDay(for: Date())).day ?? 0
+        return max(0, days) / 7
     }
 
     var body: some View {
@@ -50,6 +59,13 @@ struct PersonalDataView: View {
             }
 
             Section {
+                Toggle("Indicar cuándo empezaste a entrenar", isOn: $hasTrainingStart.animation())
+                if hasTrainingStart {
+                    DatePicker("Empecé a entrenar", selection: $trainingStart, in: ...Date(), displayedComponents: .date)
+                    if let weeks = trainingWeeks {
+                        LabeledContent("Tiempo entrenando", value: weeks == 1 ? "1 semana" : "\(weeks) semanas")
+                    }
+                }
                 Picker("Experiencia", selection: $experience) {
                     Text("Sin indicar").tag("")
                     ForEach(experienceChoices, id: \.self) { Text($0).tag($0) }
@@ -59,7 +75,7 @@ struct PersonalDataView: View {
             } header: {
                 Text("Entrenamiento")
             } footer: {
-                Text("Experiencia autodeclarada. Arco no la usa para imponer metas.")
+                Text("Experiencia y fecha de inicio autodeclaradas. Arco no las usa para imponer metas ni para calcular tu asistencia.")
             }
 
             Section {
@@ -96,6 +112,7 @@ struct PersonalDataView: View {
         guard let p = profiles.first else { return }
         displayName = p.displayName ?? ""
         if let b = p.birthDate { hasBirthDate = true; birthDate = b }
+        if let start = Preferences.trainingStart?.startDate(in: appState.calendar) { hasTrainingStart = true; trainingStart = start }
         experience = p.experience ?? ""
         goalDescription = p.goalDescription ?? ""
         gender = p.gender ?? ""
@@ -114,6 +131,7 @@ struct PersonalDataView: View {
         profile.experience = Self.cleaned(experience)
         profile.goalDescription = Self.cleaned(goalDescription)
         profile.gender = Self.cleaned(gender)
+        Preferences.trainingStart = hasTrainingStart ? CivilDay(min(trainingStart, Date()), calendar: appState.calendar) : nil
         do {
             try appState.context.save()
             dismiss()

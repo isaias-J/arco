@@ -79,7 +79,7 @@ struct SessionView: View {
     }
 }
 
-func hideKeyboard() {
+@MainActor func hideKeyboard() {
     UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
 }
 
@@ -126,7 +126,11 @@ struct ExerciseLogCard: View {
     @State private var showVariant = false
     @State private var variantText = ""
     @State private var removalBlocked = false
-
+    @State private var showSubstitute = false
+    @State private var pendingSubstituteID: String?
+    @State private var showSubstituteBlocked = false
+    /// Cambia al aplicar el incremento para que las filas de borrador relean sus valores.
+    @State private var draftsRevision = 0
     private var repo: WorkoutRepository { appState.repository }
     private var convention: LoadConvention { repo.convention(for: sessionExercise.exerciseID) }
     private var sideMode: SideMode { repo.sideMode(for: sessionExercise.exerciseID) }
@@ -142,15 +146,14 @@ struct ExerciseLogCard: View {
     }
 
     private var exerciseName: String {
-        let id = sessionExercise.exerciseID
-        let predicate = #Predicate<ExerciseModel> { $0.id == id }
-        return (try? appState.context.fetch(FetchDescriptor(predicate: predicate)))?.first?.name ?? ExerciseNames.localized(id)
+        appState.exerciseName(sessionExercise.exerciseID)
     }
 
     var body: some View {
         ArcoCard {
             VStack(alignment: .leading, spacing: Spacing.md) {
                 header
+                progressionLine
                 previousLine
                 ForEach(visibleSets) { set in
                     if set.stateRaw == SetState.completed.rawValue {
@@ -165,6 +168,7 @@ struct ExerciseLogCard: View {
                                 onUndoable(UndoAction(message: "Serie guardada") { repo.unconfirm(confirmed) })
                             }
                         )
+                        .id("\(set.id.uuidString)-\(draftsRevision)")
                     }
                 }
                 HStack {
@@ -196,6 +200,87 @@ struct ExerciseLogCard: View {
         } message: {
             Text("Este ejercicio ya tiene series realizadas. Para conservar tu trabajo, elimina antes esas series si de verdad no las hiciste.")
         }
+        .sheet(isPresented: $showSubstitute, onDismiss: {
+            if pendingSubstituteID != nil { showSubstituteBlocked = true }
+        }) {
+            NavigationStack {
+                ExercisePickerView(excluded: Set(sessionExercise.session?.exercises.map(\.exerciseID) ?? [sessionExercise.exerciseID])) { id in
+                    if !repo.substitute(sessionExercise, with: id) { pendingSubstituteID = id }
+                }
+            }
+        }
+        .alert("No se puede sustituir", isPresented: $showSubstituteBlocked) {
+            Button("Añadir aparte") {
+                if let id = pendingSubstituteID, let session = sessionExercise.session {
+                    repo.addExercise(to: session, exerciseID: id, variantKey: nil)
+                }
+                pendingSubstituteID = nil
+            }
+            Button("Cancelar", role: .cancel) { pendingSubstituteID = nil }
+        } message: {
+            Text("Ya registraste series de este ejercicio. Se añadirá el nuevo como ejercicio aparte.")
+        }
+    }
+
+    private var orderedSiblings: [SessionExerciseModel] {
+        (sessionExercise.session?.exercises ?? []).sorted { $0.order < $1.order }
+    }
+
+    // MARK: - Doble progresión (spec §13): solo informa; nunca cambia pesos sin aceptación.
+
+    @ViewBuilder
+    private var progressionLine: some View {
+        let catalog = appState.catalog
+        let id = sessionExercise.exerciseID
+        switch catalog.evaluateProgression(id, variantKey: sessionExercise.variantKey, excluding: sessionExercise.session) {
+        case .met:
+            if let rule = catalog.progressionRule(id) {
+                let unit = MassUnit(rawValue: rule.unitRaw) ?? .kilograms
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    Label("Cumpliste tu regla para considerar subir +\(SetText.number(rule.increment)) \(unit.rawValue)", systemImage: "arrow.up.forward.circle")
+                        .font(.caption.bold())
+                        .foregroundStyle(ArcoColor.brandText)
+                    if !incrementableDrafts.isEmpty {
+                        Button("Aplicar a los borradores") { applyIncrement(rule.increment, unit: unit) }
+                            .font(.caption)
+                            .buttonStyle(.bordered)
+                            .frame(minHeight: 44)
+                            .accessibilityHint("Suma el incremento solo a las series de trabajo pendientes; puedes cambiarlas antes de confirmar.")
+                            .accessibilityIdentifier("session.applyIncrement")
+                    }
+                }
+                .accessibilityElement(children: .contain)
+            }
+        case .notMet(let reached, let need):
+            Text("Regla de progresión: \(reached) de \(need) series en el techo la última vez")
+                .font(.caption).foregroundStyle(.secondary)
+        case .effortUnknown:
+            Text("Falta el RIR que pide tu regla")
+                .font(.caption).foregroundStyle(.secondary)
+        case .notEnoughSets, .disabled:
+            EmptyView()
+        }
+    }
+
+    /// Borradores pendientes de trabajo con carga conocida y convención de peso movido.
+    private var incrementableDrafts: [SetRecordModel] {
+        sessionExercise.sets.filter {
+            $0.stateRaw == SetState.pending.rawValue
+                && $0.typeRaw == SetType.working.rawValue
+                && $0.loadAmount != nil
+                && (LoadConvention(rawValue: $0.loadConventionRaw)?.isLiftedLoad ?? false)
+        }
+    }
+
+    private func applyIncrement(_ increment: Decimal, unit: MassUnit) {
+        for draft in incrementableDrafts {
+            guard let amount = draft.loadAmount else { continue }
+            let draftUnit = MassUnit(rawValue: draft.loadUnitRaw) ?? unit
+            let delta = draftUnit == unit ? increment : increment * unit.kilogramsPerUnit / draftUnit.kilogramsPerUnit
+            draft.loadAmount = amount + delta
+        }
+        try? appState.context.save()
+        draftsRevision += 1
     }
 
     private func index(of set: SetRecordModel) -> Int {
@@ -228,6 +313,15 @@ struct ExerciseLogCard: View {
                 )) {
                     Text("Bilateral").tag(SideMode.bilateral)
                     Text("Izquierda y derecha").tag(SideMode.perSide)
+                }
+                Divider()
+                Button("Subir", systemImage: "arrow.up") { repo.move(sessionExercise, by: -1) }
+                    .disabled(orderedSiblings.first?.id == sessionExercise.id)
+                Button("Bajar", systemImage: "arrow.down") { repo.move(sessionExercise, by: 1) }
+                    .disabled(orderedSiblings.last?.id == sessionExercise.id)
+                Button("Sustituir por…", systemImage: "arrow.left.arrow.right") {
+                    pendingSubstituteID = nil
+                    showSubstitute = true
                 }
                 Divider()
                 Button("Quitar de la sesión", role: .destructive) {
@@ -584,6 +678,7 @@ struct SessionSummaryView: View {
     let summary: SessionSummary
     let canSaveFavorite: Bool
     let onClose: (Bool) -> Void
+    @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
     @State private var favorite = false
 
@@ -602,12 +697,12 @@ struct SessionSummaryView: View {
                 }
                 if !summary.exerciseIDs.isEmpty {
                     Section("Ejercicios realizados") {
-                        ForEach(summary.exerciseIDs, id: \.self) { Text(ExerciseNames.localized($0)) }
+                        ForEach(summary.exerciseIDs, id: \.self) { Text(appState.exerciseName($0)) }
                     }
                 }
                 if !summary.newLoadRecords.isEmpty {
                     Section("Récords de carga comprobados") {
-                        ForEach(summary.newLoadRecords, id: \.self) { Label(ExerciseNames.localized($0), systemImage: "rosette") }
+                        ForEach(summary.newLoadRecords, id: \.self) { Label(appState.exerciseName($0), systemImage: "rosette") }
                     }
                 }
                 if canSaveFavorite {

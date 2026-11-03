@@ -26,7 +26,7 @@ struct NotificationSettingsView: View {
             } header: {
                 Text("Recordatorio de entrenamiento")
             } footer: {
-                Text("Solo se avisa en días con rutina planificada y aún sin asistencia. Los descansos (jueves y domingo en tu rutina) no reciben aviso.")
+                Text("Solo se avisa en días con rutina planificada y aún sin asistencia. Los días de descanso de tu rutina no reciben aviso.")
             }
             Section {
                 ForEach(days, id: \.self) { day in
@@ -46,6 +46,16 @@ struct NotificationSettingsView: View {
             } footer: {
                 Text("Desactivado hasta que elijas un día y una hora.")
             }
+            Section {
+                ForEach(days, id: \.self) { day in
+                    DayReminderRow(category: .summary, weekday: day, isRest: false)
+                }
+            } header: {
+                Text("Resumen semanal")
+            } footer: {
+                Text("Desactivado por defecto. El aviso es una invitación genérica; las cifras se calculan al abrir la app.")
+            }
+            .accessibilityIdentifier("notifications.summary")
             Section {
                 Text("Los avisos se programan en este dispositivo para las próximas 4 semanas y se renuevan al abrir Arco. iOS no permite comprobar condiciones cada noche: si no abres la app en ese tiempo, los avisos se detienen hasta la próxima apertura.")
                     .font(.footnote).foregroundStyle(.secondary)
@@ -132,7 +142,7 @@ private struct DayReminderRow: View {
     }
 
     var body: some View {
-        if isRest && category != .photo {
+        if isRest && category != .photo && category != .summary {
             LabeledContent(weekday.displayName, value: "Descanso planificado")
                 .foregroundStyle(.secondary)
         } else {

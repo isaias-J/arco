@@ -10,6 +10,7 @@ struct ProgressDashboardView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: Spacing.lg) {
+                    WeeklySummaryCard()
                     MuscleWeeklyCountCard(sessions: sessions)
                     ExerciseProgressLinksCard(sessions: sessions)
                     if sessions.isEmpty {
@@ -39,6 +40,7 @@ struct ProgressDashboardView: View {
 /// @Query; solo aparecen ejercicios con al menos una serie de trabajo elegible.
 struct ExerciseProgressLinksCard: View {
     let sessions: [WorkoutSessionModel]
+    @Environment(AppState.self) private var appState
 
     /// Ejercicios con registros, ordenados por el entrenamiento más reciente.
     private var exercises: [ExerciseWithRecords] {
@@ -70,7 +72,7 @@ struct ExerciseProgressLinksCard: View {
                             ExerciseProgressView(exerciseID: item.exerciseID)
                         } label: {
                             HStack {
-                                Text(ExerciseNames.localized(item.exerciseID))
+                                Text(appState.exerciseName(item.exerciseID))
                                 Spacer()
                                 Text(item.lastTrained.formatted(.dateTime.day().month()))
                                     .font(.caption)
@@ -82,7 +84,7 @@ struct ExerciseProgressLinksCard: View {
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel("Ver progreso de \(ExerciseNames.localized(item.exerciseID))")
+                        .accessibilityLabel("Ver progreso de \(appState.exerciseName(item.exerciseID))")
                         if item.id != exercises.last?.id {
                             Divider()
                         }

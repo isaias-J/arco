@@ -102,6 +102,19 @@ public struct WeeklySummary: Sendable, Equatable {
     public let topGroups: [(group: MuscleGroup, direct: Int)]
     public let streak: Int
 
+    /// Inicializador público para que la app construya el resumen con sus registros.
+    public init(
+        start: Date, end: Date, isPartial: Bool, sessions: Int, workingSets: Int,
+        previousWeekWorkingSets: Int?, attendedDays: Int, plannedDays: Int,
+        topGroups: [(group: MuscleGroup, direct: Int)], streak: Int
+    ) {
+        self.start = start; self.end = end; self.isPartial = isPartial
+        self.sessions = sessions; self.workingSets = workingSets
+        self.previousWeekWorkingSets = previousWeekWorkingSets
+        self.attendedDays = attendedDays; self.plannedDays = plannedDays
+        self.topGroups = topGroups; self.streak = streak
+    }
+
     public static func == (a: WeeklySummary, b: WeeklySummary) -> Bool {
         a.start == b.start && a.sessions == b.sessions && a.workingSets == b.workingSets
             && a.attendedDays == b.attendedDays && a.plannedDays == b.plannedDays && a.streak == b.streak

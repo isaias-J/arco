@@ -10,14 +10,15 @@ import ArcoCore
 /// - El color representa asistencia O cantidad de series, con el MODO identificado (Picker).
 ///   No se equipara "más color = mejor": cada celda lleva símbolo/estado además del color.
 /// - No se muestra ausencia automáticamente por falta de datos. Los días futuros = estado futuro.
-/// - Se cruzan eventos (@Query) con la rutina (RoutineTemplateModel) para distinguir planificado
-///   vs descanso. Año bisiesto y límites de semana/mes se manejan con Calendar + startOfDay.
+/// - Se cruzan eventos (@Query) con la rutina vigente en cada fecha (PlanHistory) para distinguir
+///   planificado vs descanso. Año bisiesto y límites de semana/mes se manejan con Calendar + startOfDay.
 struct AnnualCalendarView: View {
     @Environment(AppState.self) private var appState
     @Query private var events: [AttendanceEventModel]
     @Query private var sessions: [WorkoutSessionModel]
     @Query private var templates: [RoutineTemplateModel]
     @Query private var resolutions: [AttendanceResolutionModel]
+    @Query private var planVersions: [PlanVersionModel]
 
     @State private var year: Int
     @State private var layout: CalendarLayout = .year
@@ -32,6 +33,13 @@ struct AnnualCalendarView: View {
     private var calendar: Calendar { appState.calendar }
 
     // MARK: - Modelo de días
+
+    /// Historial de la rutina: cada día usa el plan vigente en su fecha (T39).
+    private var planHistory: PlanHistory {
+        PlanHistory(versions: planVersions.compactMap { v in
+            PlanHistory.decode(v.daysJSON).map { PlanHistory.Version(validFrom: v.validFrom, plan: $0) }
+        })
+    }
 
     /// Mapa fecha→AttendanceDay consolidado (varias sesiones el mismo día = un día, T35).
     private var attendanceByDay: [Date: AttendanceDay] {
@@ -208,7 +216,7 @@ struct AnnualCalendarView: View {
 
         let state = CalendarStateResolver.state(
             of: civil,
-            plan: WeeklyPlan(templates: templates),
+            plan: planHistory.versions.isEmpty ? WeeklyPlan(templates: templates) : planHistory.plan(on: day),
             today: CivilDay(Date(), calendar: calendar),
             calendar: calendar,
             automaticDays: sources.contains(.automatic) ? [civil] : [],
@@ -506,6 +514,7 @@ extension CalendarDayState {
         case .plannedUnconfirmed: return "Planificado sin registro"
         case .confirmedAbsence: return "Ausencia confirmada"
         case .future: return "Futuro"
+        case .notTracked: return "Antes de usar Arco"
         }
     }
 
@@ -519,13 +528,14 @@ extension CalendarDayState {
         case .plannedUnconfirmed: return "questionmark"
         case .confirmedAbsence: return "xmark"
         case .future: return "circle.dotted"
+        case .notTracked: return "minus"
         }
     }
 
     /// Estados mostrados en la leyenda (los relevantes para esta versión).
     static var legendItems: [(state: CalendarDayState, color: Color)] {
         let states: [CalendarDayState] = [
-            .trainedRegistered, .manualAttendance, .plannedRest, .confirmedRest, .plannedUnconfirmed, .future
+            .trainedRegistered, .manualAttendance, .plannedRest, .confirmedRest, .plannedUnconfirmed, .future, .notTracked
         ]
         return states.map { ($0, CalendarPalette.baseColor(for: $0)) }
     }
@@ -543,6 +553,7 @@ enum CalendarPalette {
         case .plannedUnconfirmed: return ArcoColor.surface
         case .confirmedAbsence: return Color.gray.opacity(0.4)
         case .future: return ArcoColor.surface.opacity(0.5)
+        case .notTracked: return ArcoColor.surface.opacity(0.3)
         }
     }
 
