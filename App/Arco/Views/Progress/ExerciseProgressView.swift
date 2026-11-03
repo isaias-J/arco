@@ -22,6 +22,8 @@ struct ExerciseProgressView: View {
     @State private var selectedKey: ComparableKey?
     /// Punto seleccionado en el gráfico (abre detalle de fecha/valor/series — spec §12).
     @State private var selectedDate: Date?
+    /// Criterio de la gráfica de repeticiones (nil = el predeterminado para los datos).
+    @State private var repsChoice: RepsComparison?
 
     init(exerciseID: String) {
         self.exerciseID = exerciseID
@@ -134,11 +136,13 @@ struct ExerciseProgressView: View {
                         emptyState(title: "Sin series en este periodo", text: "Elige un periodo más amplio o registra una sesión de esta variante.")
                     } else if isLifted {
                         maxLoadCard
+                        repsCard
                         recordsCard
                         if !e1rmPoints.isEmpty { e1rmCard }
                         historyCard
                     } else {
                         nonLiftedNotice
+                        repsCard
                         historyCard
                     }
                 }
@@ -178,7 +182,7 @@ struct ExerciseProgressView: View {
             VStack(alignment: .leading, spacing: Spacing.sm) {
                 Picker("Variante / convención", selection: Binding(
                     get: { effectiveKey },
-                    set: { selectedKey = $0; selectedDate = nil }
+                    set: { selectedKey = $0; selectedDate = nil; repsChoice = nil }
                 )) {
                     ForEach(options) { key in
                         Text(key.label).tag(Optional(key))
@@ -377,6 +381,128 @@ struct ExerciseProgressView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Repeticiones (spec §12)
+
+    private var repsSessions: [RepsSession] {
+        periodSessions.map { RepsSession(id: $0.id, date: $0.date, sets: $0.sets) }
+    }
+
+    /// Opciones válidas para esta convención: la asistencia no admite "más pesada" (más cifra =
+    /// menos dificultad) y "sin carga" solo compara repeticiones.
+    private var repsOptions: [RepsComparison] {
+        let loads = RepsHistory.loads(repsSessions).map { RepsComparison.atLoad($0.kilograms) }
+        if loads.isEmpty { return [.withoutLoad] }
+        return effectiveKey?.convention == .assistance ? loads : loads + [.heaviestSet]
+    }
+
+    private var repsComparison: RepsComparison {
+        if let repsChoice, repsOptions.contains(repsChoice) { return repsChoice }
+        let d = RepsHistory.defaultComparison(repsSessions)
+        return repsOptions.contains(d) ? d : (repsOptions.first ?? .withoutLoad)
+    }
+
+    private func repsOptionLabel(_ c: RepsComparison) -> String {
+        let noun = effectiveKey?.convention == .assistance ? "asistencia" : "carga"
+        switch c {
+        case .atLoad(let kg): return "Misma \(noun): \(massText(kg)) \(unitLabel)"
+        case .heaviestSet: return "Serie más pesada de cada sesión"
+        case .withoutLoad: return "Sin carga"
+        }
+    }
+
+    private var repsCard: some View {
+        let comparison = repsComparison
+        let points = RepsHistory.points(repsSessions, comparison: comparison)
+        let sides = Set(points.map(\.side))
+        return ArcoCard {
+            VStack(alignment: .leading, spacing: Spacing.md) {
+                Text("Repeticiones por sesión").font(.headline)
+                if repsOptions.count > 1 {
+                    Picker("Comparar", selection: Binding(get: { comparison }, set: { repsChoice = $0 })) {
+                        ForEach(repsOptions, id: \.self) { Text(repsOptionLabel($0)).tag($0) }
+                    }
+                    .pickerStyle(.menu)
+                    .accessibilityIdentifier("exercise.reps.comparison")
+                }
+                Text(repsExplanation(comparison))
+                    .font(.caption2).foregroundStyle(.secondary)
+                if points.isEmpty {
+                    Text("No hay series con este criterio en el periodo elegido.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                } else {
+                    Chart(Array(points.enumerated()), id: \.offset) { _, p in
+                        LineMark(x: .value("Fecha", p.date, unit: .day), y: .value("Repeticiones", p.reps))
+                            .foregroundStyle(by: .value("Lado", ExerciseSideText.label(p.side)))
+                        PointMark(x: .value("Fecha", p.date, unit: .day), y: .value("Repeticiones", p.reps))
+                            .foregroundStyle(by: .value("Lado", ExerciseSideText.label(p.side)))
+                    }
+                    .chartLegend(sides.count > 1 ? .visible : .hidden)
+                    .chartXScale(domain: repsDomain(points))
+                    .chartXAxis {
+                        AxisMarks(values: .automatic(desiredCount: 4)) { _ in
+                            AxisGridLine()
+                            AxisValueLabel(format: .dateTime.day().month(.abbreviated))
+                        }
+                    }
+                    .chartYAxisLabel("rep.")
+                    .frame(height: 180)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(repsAccessibility(points))
+                    .accessibilityIdentifier("exercise.reps.chart")
+                    DisclosureGroup("Ver como tabla") {
+                        VStack(alignment: .leading, spacing: Spacing.xs) {
+                            ForEach(Array(points.reversed().enumerated()), id: \.offset) { _, p in
+                                HStack {
+                                    Text(ProfileFormat.date(p.date))
+                                    if p.side != .bilateral { Text(ExerciseSideText.label(p.side)).foregroundStyle(.secondary) }
+                                    Spacer()
+                                    Text(repsPointText(p)).monospacedDigit()
+                                }
+                                .font(.caption)
+                                .accessibilityElement(children: .combine)
+                            }
+                        }
+                        .padding(.top, Spacing.xs)
+                    }
+                    .font(.caption)
+                }
+            }
+        }
+        .accessibilityIdentifier("exercise.reps")
+    }
+
+    /// Eje de fechas en días; con una sola sesión se amplía para no mostrar horas.
+    private func repsDomain(_ points: [RepsPoint]) -> ClosedRange<Date> {
+        let dates = points.map { calendar.startOfDay(for: $0.date) }
+        let first = dates.min() ?? calendar.startOfDay(for: Date())
+        let last = dates.max() ?? first
+        let start = calendar.date(byAdding: .day, value: -1, to: first) ?? first
+        let end = calendar.date(byAdding: .day, value: first == last ? 2 : 1, to: last) ?? last
+        return start...end
+    }
+
+    private func repsPointText(_ p: RepsPoint) -> String {
+        let load = p.loadKilograms.map { " a \(massText($0)) \(unitLabel)" } ?? ""
+        return "\(p.reps) rep.\(load)"
+    }
+
+    private func repsExplanation(_ c: RepsComparison) -> String {
+        switch c {
+        case .atLoad:
+            return "Mejor serie de trabajo de cada sesión con exactamente esa \(effectiveKey?.convention == .assistance ? "asistencia" : "carga"). Las sesiones sin esa carga no aparecen (no son cero). Solo esta variante y convención."
+        case .heaviestSet:
+            return "Repeticiones de la serie con más carga de cada sesión. La carga puede cambiar entre puntos (figura en la tabla): no es una comparación directa de progreso."
+        case .withoutLoad:
+            return "Mejor serie de trabajo de cada sesión; no hay carga registrada que comparar."
+        }
+    }
+
+    private func repsAccessibility(_ points: [RepsPoint]) -> String {
+        "Repeticiones por sesión. " + points.map { p in
+            "\(ProfileFormat.date(p.date))\(p.side == .bilateral ? "" : ", \(ExerciseSideText.label(p.side))"): \(repsPointText(p))"
+        }.joined(separator: "; ")
     }
 
     // MARK: - Helpers de presentación

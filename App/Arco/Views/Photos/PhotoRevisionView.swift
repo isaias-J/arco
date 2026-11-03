@@ -72,8 +72,14 @@ struct CapturePosePickerView: View {
         NavigationStack {
             List {
                 weightSection
-                Section("Poses base") {
+                Section {
                     ForEach(Pose.base, id: \.id) { poseRow($0) }
+                } header: {
+                    Text("Poses base")
+                } footer: {
+                    NavigationLink("Ver guía de poses") { PoseGuideView() }
+                        .font(.footnote)
+                        .accessibilityIdentifier("revision.poseGuide")
                 }
                 Section("Poses opcionales") {
                     ForEach(Pose.optional, id: \.id) { poseRow($0) }
@@ -194,9 +200,15 @@ struct CapturePosePickerView: View {
             cameraPose = pose
         } label: {
             HStack(spacing: Spacing.md) {
-                Image(systemName: pose.referenceSymbol)
-                    .foregroundStyle(ArcoColor.brand)
-                    .accessibilityHidden(true)
+                Group {
+                    if pose.hasIllustration {
+                        PoseIllustration(pose: pose, color: ArcoColor.brand)
+                    } else {
+                        Image(systemName: pose.referenceSymbol).foregroundStyle(ArcoColor.brand)
+                    }
+                }
+                .frame(width: 32, height: 56)
+                .accessibilityHidden(true)
                 VStack(alignment: .leading) {
                     Text(pose.displayName).font(.body).foregroundStyle(ArcoColor.textPrimary)
                     Text(pose.shortDescription)

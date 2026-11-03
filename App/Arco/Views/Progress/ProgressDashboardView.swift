@@ -12,6 +12,7 @@ struct ProgressDashboardView: View {
                 VStack(alignment: .leading, spacing: Spacing.lg) {
                     WeeklySummaryCard()
                     MuscleWeeklyCountCard(sessions: sessions)
+                    MuscleHistoryLinkCard()
                     ExerciseProgressLinksCard(sessions: sessions)
                     if sessions.isEmpty {
                         ArcoCard {

@@ -30,6 +30,7 @@ struct BackupView: View {
     @State private var showPasswordPrompt = false
     @State private var preview: RestorePreview?
     @State private var replaceProfile = true
+    @State private var strategy: RestoreStrategy = .mergeKeepDevice
 
     private var vaultUnlocked: Bool { appState.vaultLock.isUnlocked }
     private var passwordProblem: String? {
@@ -70,7 +71,7 @@ struct BackupView: View {
             Text("Se comprobará todo el archivo antes de cambiar nada.")
         }
         .sheet(item: $preview) { p in
-            RestorePreviewSheet(preview: p, replaceProfile: $replaceProfile) { confirmed in
+            RestorePreviewSheet(preview: p, replaceProfile: $replaceProfile, strategy: $strategy) { confirmed in
                 preview = nil
                 if confirmed { Task { await performRestore() } } else { cleanupRestore() }
             }
@@ -130,7 +131,7 @@ struct BackupView: View {
             Button("Restaurar desde una copia") { showImporter = true }
                 .accessibilityIdentifier("backup.restore")
         } footer: {
-            Text("Se combinan los datos del archivo con los actuales sin duplicar registros. Una contraseña incorrecta o un archivo dañado no modifican nada.")
+            Text("Antes de cambiar nada verás qué se añadirá, qué ya está, qué conflictos hay y qué harás con ellos. Una contraseña incorrecta o un archivo dañado no modifican nada. Las fotos de este iPhone nunca se borran al restaurar.")
         }
     }
 
@@ -194,6 +195,7 @@ struct BackupView: View {
         defer { working = false }
         await Task.yield()
         do {
+            strategy = .mergeKeepDevice
             preview = try ArchiveImporter(context: appState.context, photos: appState.vaultCrypto).preview(url: url, password: restorePassword)
         } catch {
             message = Self.describe(error)
@@ -207,16 +209,16 @@ struct BackupView: View {
         defer { working = false; cleanupRestore() }
         await Task.yield()
         do {
+            let withProfile = replaceProfile || strategy == .replace
             let (report, prefs) = try ArchiveImporter(context: appState.context, photos: appState.vaultCrypto)
-                .restore(url: url, password: restorePassword, replaceProfileAndSettings: replaceProfile)
-            if replaceProfile { Preferences.restore(prefs) }
+                .restore(url: url, password: restorePassword, replaceProfileAndSettings: withProfile, strategy: strategy)
+            if withProfile { Preferences.restore(prefs) }
             try? appState.vaultCrypto.reapplyProtectionAttributes()
             if let settings = (try? appState.context.fetch(FetchDescriptor<AppSettingsModel>()))?.first {
                 appState.settings = settings
             }
             await appState.refreshReminders()
-            let inserted = report.inserted
-            message = "Restauración completada: \(inserted["sessions"] ?? 0) sesiones, \(inserted["photos"] ?? 0) fotos y \(inserted["bodyWeights"] ?? 0) pesajes añadidos. Ya existentes y conservados: \(report.skippedExisting.values.reduce(0, +))."
+            message = RestoreReportText.outcome(report, strategy: strategy)
         } catch {
             message = Self.describe(error)
         }
@@ -255,17 +257,27 @@ extension RestorePreview: @retroactive Identifiable {
     public var id: Date { exportedAt }
 }
 
-/// Resumen previo a restaurar (spec §19): qué contiene y qué hará.
+/// Resumen previo a restaurar (spec §19): qué contiene la copia, qué hará cada opción con los
+/// datos actuales (calculado sin modificar nada) y confirmación explícita. Reemplazar exige una
+/// segunda confirmación que enumera lo que se eliminará.
 struct RestorePreviewSheet: View {
     let preview: RestorePreview
     @Binding var replaceProfile: Bool
+    @Binding var strategy: RestoreStrategy
     let onDecision: (Bool) -> Void
+    @State private var confirmReplace = false
 
     private let labels: [(String, String)] = [
         ("sessions", "Sesiones"), ("sets", "Series"), ("bodyWeights", "Pesajes"), ("heights", "Alturas"),
         ("measurements", "Medidas"), ("attendance", "Registros de asistencia"), ("goals", "Metas"),
         ("customExercises", "Ejercicios personalizados"), ("photos", "Fotos")
     ]
+
+    private var plan: RestoreReport { preview.plans[strategy] ?? RestoreReport() }
+    private var hasExistingData: Bool {
+        let p = preview.plans[.mergeKeepDevice] ?? RestoreReport()
+        return !p.skippedExisting.isEmpty || !p.updated.isEmpty || !p.keptDevice.isEmpty || !p.conflicts.isEmpty || !p.onlyOnDevice.filter { $0.key != "exercises" }.isEmpty
+    }
 
     var body: some View {
         NavigationStack {
@@ -278,10 +290,55 @@ struct RestorePreviewSheet: View {
                         Label("Esta copia no incluye fotos.", systemImage: "photo.badge.exclamationmark")
                     }
                 }
+
                 Section {
-                    Toggle("Sustituir perfil, ajustes, rutina y recordatorios por los del archivo", isOn: $replaceProfile)
+                    Picker("Cómo restaurar", selection: $strategy) {
+                        Text("Combinar (recomendado)").tag(RestoreStrategy.mergeKeepDevice)
+                        Text("Combinar; en conflictos, usar la copia").tag(RestoreStrategy.mergePreferArchive)
+                        Text("Reemplazar con la copia").tag(RestoreStrategy.replace)
+                    }
+                    .pickerStyle(.inline)
+                    .labelsHidden()
+                    .accessibilityIdentifier("restore.strategy")
+                } header: {
+                    Text("Cómo restaurar")
                 } footer: {
-                    Text("Los entrenamientos, pesos, medidas, fotos y asistencia se añaden sin duplicar lo que ya existe. No se borra nada de lo actual.")
+                    Text(RestoreReportText.explanation(strategy))
+                }
+
+                Section {
+                    ForEach(RestoreReportText.forecastLines(plan, strategy: strategy), id: \.self) { line in
+                        Text(line).font(.subheadline)
+                    }
+                } header: {
+                    Text(hasExistingData ? "Qué pasará con los datos de este iPhone" : "Qué se añadirá")
+                }
+                .accessibilityIdentifier("restore.forecast")
+
+                if !plan.conflicts.isEmpty {
+                    Section {
+                        ForEach(Array(plan.conflicts.prefix(12).enumerated()), id: \.offset) { _, c in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(c.summary).font(.footnote)
+                                Text(c.resolution == .keptDevice ? "Se conservará lo de este iPhone" : "Se aplicará lo de la copia")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                        if plan.conflicts.count > 12 {
+                            Text("Y \(plan.conflicts.count - 12) conflictos más.").font(.caption).foregroundStyle(.secondary)
+                        }
+                    } header: {
+                        Text("Conflictos (\(plan.conflicts.count))")
+                    } footer: {
+                        Text("Un conflicto es un registro que cambió de forma distinta aquí y en la copia sin que los datos permitan saber cuál es posterior. Arco no adivina: aplica la opción que elijas.")
+                    }
+                }
+
+                Section {
+                    Toggle("Sustituir perfil, ajustes, rutina y recordatorios por los del archivo", isOn: strategy == .replace ? .constant(true) : $replaceProfile)
+                        .disabled(strategy == .replace)
+                } footer: {
+                    Text(strategy == .replace ? "Al reemplazar, el perfil, los ajustes, la rutina y los recordatorios también pasan a ser los de la copia." : "Si lo desactivas, se conservan los de este iPhone.")
                 }
             }
             .navigationTitle("Restaurar copia")
@@ -289,10 +346,90 @@ struct RestorePreviewSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancelar") { onDecision(false) } }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Restaurar") { onDecision(true) }.accessibilityIdentifier("restore.confirm")
+                    Button(strategy == .replace ? "Reemplazar" : "Restaurar") {
+                        if strategy == .replace { confirmReplace = true } else { onDecision(true) }
+                    }
+                    .accessibilityIdentifier("restore.confirm")
                 }
             }
+            .alert("¿Reemplazar los datos de este iPhone?", isPresented: $confirmReplace) {
+                Button("Reemplazar", role: .destructive) { onDecision(true) }
+                    .accessibilityIdentifier("restore.replace.confirm")
+                Button("Cancelar", role: .cancel) {}
+            } message: {
+                Text(RestoreReportText.replaceWarning(plan))
+            }
         }
+    }
+}
+
+/// Textos de la restauración en español, a partir del informe real (sin promesas).
+enum RestoreReportText {
+    static let names: [String: String] = [
+        "sessions": "sesiones", "sessionExercises": "ejercicios de sesión", "sets": "series",
+        "exercises": "ejercicios del catálogo", "exerciseSettings": "ajustes de carga", "progressionRules": "reglas de progresión",
+        "customAttributions": "atribuciones personalizadas", "bodyWeights": "pesajes", "heights": "alturas",
+        "measurements": "medidas", "attendance": "registros de asistencia", "resolutions": "descansos o ausencias",
+        "reminderOverrides": "cambios de avisos", "goals": "metas", "photos": "fotos", "drafts": "borradores sin realizar"
+    ]
+    private static let order = ["sessions", "sets", "exercises", "photos", "bodyWeights", "heights", "measurements", "attendance", "resolutions", "goals", "sessionExercises", "exerciseSettings", "progressionRules", "customAttributions", "reminderOverrides", "drafts"]
+
+    static func list(_ dict: [String: Int]) -> String {
+        order.compactMap { key in dict[key].flatMap { $0 > 0 ? "\($0) \(names[key] ?? key)" : nil } }.joined(separator: ", ")
+    }
+
+    static func explanation(_ s: RestoreStrategy) -> String {
+        switch s {
+        case .mergeKeepDevice:
+            return "Añade lo que falta y adopta los cambios de la copia cuando se puede saber que son posteriores (por ejemplo, una serie confirmada después de su borrador). Si un registro cambió de forma distinta en los dos lados, se queda lo de este iPhone. No borra nada."
+        case .mergePreferArchive:
+            return "Igual que combinar, pero en los conflictos se aplica lo de la copia. No borra nada de este iPhone."
+        case .replace:
+            return "Deja entrenamientos, medidas, asistencia, catálogo, perfil y rutina exactamente como en la copia y elimina de este iPhone lo que la copia no tiene. Las fotos de este iPhone nunca se borran. Crea antes una copia de este iPhone si quieres poder volver atrás."
+        }
+    }
+
+    static func forecastLines(_ r: RestoreReport, strategy: RestoreStrategy) -> [String] {
+        var out: [String] = []
+        if !r.inserted.isEmpty { out.append("Se añadirán: \(list(r.inserted)).") }
+        if !r.updated.isEmpty { out.append("Se actualizarán con la copia: \(list(r.updated)).") }
+        if !r.keptDevice.isEmpty { out.append("Se conservará la versión de este iPhone, que es posterior o ya incluye lo de la copia: \(list(r.keptDevice)).") }
+        if !r.conflicts.isEmpty {
+            out.append("Conflictos: \(r.conflicts.count) (\(strategy == .mergeKeepDevice ? "se conservará lo de este iPhone" : "se aplicará lo de la copia")).")
+        }
+        if r.skippedDrafts > 0 { out.append("No se añadirán \(r.skippedDrafts) borradores sin realizar de sesiones que aquí ya existen.") }
+        if let drafts = r.removed["drafts"], drafts > 0 { out.append("Se descartarán \(drafts) borradores sin realizar de sesiones que la copia ya cerró.") }
+        let removed = r.removed.filter { $0.key != "drafts" }
+        if !removed.isEmpty { out.append("Se ELIMINARÁN de este iPhone: \(list(removed)).") }
+        let onlyHere = r.onlyOnDevice.filter { $0.key != "exercises" }
+        if !onlyHere.isEmpty { out.append("Solo están en este iPhone y se conservan: \(list(onlyHere)).") }
+        if !r.skippedExisting.isEmpty { out.append("Ya están aquí sin cambios: \(r.total(r.skippedExisting)) registros.") }
+        if out.isEmpty { out.append("La copia no aporta cambios.") }
+        return out
+    }
+
+    static func replaceWarning(_ r: RestoreReport) -> String {
+        let removed = r.removed.filter { $0.key != "drafts" }
+        let what = removed.isEmpty ? "No se eliminará ningún registro." : "Se eliminarán de este iPhone: \(list(removed))."
+        return "\(what) Los registros que también están en la copia quedarán como en la copia. Las fotos de este iPhone se conservan. Esta acción no se puede deshacer salvo con otra copia."
+    }
+
+    /// Mensaje final: solo dice "completa" si todo lo de la copia quedó reflejado.
+    static func outcome(_ r: RestoreReport, strategy: RestoreStrategy) -> String {
+        let leftOut = r.conflictsKeptDevice + r.skippedDrafts
+        var parts: [String] = []
+        parts.append(leftOut == 0 ? "Restauración terminada." : "Restauración terminada con diferencias.")
+        parts.append(r.inserted.isEmpty ? "No había registros nuevos." : "Añadido: \(list(r.inserted)).")
+        if !r.updated.isEmpty { parts.append("Actualizado con la copia: \(list(r.updated)).") }
+        if !r.keptDevice.isEmpty { parts.append("Conservada la versión posterior de este iPhone: \(list(r.keptDevice)).") }
+        if r.conflictsKeptDevice > 0 { parts.append("\(r.conflictsKeptDevice) conflictos: se conservó lo de este iPhone y no se aplicó lo de la copia.") }
+        if r.conflictsUsedArchive > 0 { parts.append("\(r.conflictsUsedArchive) conflictos: se aplicó lo de la copia.") }
+        if r.skippedDrafts > 0 { parts.append("\(r.skippedDrafts) borradores sin realizar no se añadieron.") }
+        let removed = r.removed.filter { $0.key != "drafts" }
+        if !removed.isEmpty { parts.append("Eliminado de este iPhone: \(list(removed)).") }
+        let onlyHere = r.onlyOnDevice.filter { $0.key != "exercises" }
+        if !onlyHere.isEmpty { parts.append("Conservado lo que solo estaba aquí: \(list(onlyHere)).") }
+        return parts.joined(separator: " ")
     }
 }
 

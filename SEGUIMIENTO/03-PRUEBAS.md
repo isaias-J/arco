@@ -1,6 +1,6 @@
 # Arco — Matriz de requisitos y criterios de aceptación
 
-Actualizada: 2026-11-03, al cierre de las etapas de `08-ETAPAS.md`.
+Actualizada: 2026-11-03, tras la segunda revisión independiente (`10-SEGUNDA-REVISION.md`).
 
 **Estados:** *no implementado* · *implementado sin probar* · *probado con datos simulados*
 (pruebas automáticas de ArcoCore con SwiftData real en memoria o en disco temporal) ·
@@ -9,9 +9,10 @@ Actualizada: 2026-11-03, al cierre de las etapas de `08-ETAPAS.md`.
 Ningún criterio está **probado en iPhone real** todavía. Lista para el iPhone: `09-VERIFICACION-IPHONE.md`.
 
 **Evidencia ejecutada**
-- `cd ArcoCore && swift test` → 97 pruebas, 16 suites, en verde.
-- `xcodebuild -scheme Arco -destination 'id=<Arco-QA>' test` → 14 recorridos de interfaz en verde
-  (7 en `ArcoFlowTests`, 7 en `ArcoStageFlowTests`).
+- `cd ArcoCore && swift test` → 123 pruebas, 19 suites, en verde (antes de los cambios: 97; las 2 pruebas independientes fallaban).
+- `xcodebuild -scheme Arco -destination 'id=<simulador temporal>' test` → 19 recorridos de interfaz
+  en verde en una sola corrida con la firma habitual del simulador (7 `ArcoFlowTests`,
+  7 `ArcoStageFlowTests`, 5 `ArcoReviewFlowTests`). Con `CODE_SIGNING_ALLOWED=NO`, `testVaultPIN` falla.
 - Archivos: `ArcoCore/Tests/ArcoCoreTests/*.swift`, `AppUITests/*.swift`.
 
 | Requisito | Estado | Evidencia | Prueba | Pendiente |
@@ -66,9 +67,9 @@ Ningún criterio está **probado en iPhone real** todavía. Lista para el iPhone
 | T67 Borrar foto y derivados | implementado sin probar | — | — | iPhone |
 | T68 Secuencia temporal | implementado sin probar | caché acotada | — | rendimiento en iPhone |
 | T69 CSV seguro | probado con datos simulados | — | `CSVTests` | — |
-| T70 Contraseña errónea/corrupción no modifican | probado con datos simulados | validación completa antes de escribir | `wrongPassword`, `corruptedPhotoChunk`, `truncatedOrTampered` | — |
+| T70 Contraseña errónea/corrupción no modifican | probado en simulador | validación completa antes de escribir; fallo a mitad deshace todo | `wrongPassword`, `corruptedPhotoChunk`, `truncatedOrTampered`, `failureRollsBack`, UI `testExportAndRestoreReport` | — |
 | T71 Restaurar en instalación limpia con nuevas claves | probado con datos simulados | fotos recifradas con otra clave | `fullRoundTrip` | exportar/importar archivo real en iPhone |
-| T72 Reimportar sin duplicar | probado con datos simulados | — | `reimportDoesNotDuplicate` | — |
+| T72 Reimportar sin duplicar | probado con datos simulados | — | `reimportDoesNotDuplicate`, `repeatedRestoreIsIdempotent` | — |
 | T73 Migración v1 → v2 | probado con datos simulados | `ArcoMigrationPlan` | `migrationFromV1` | — |
 | T74 Claro/oscuro/texto grande/VoiceOver | parcial: probado en simulador | capturas oscuro + texto XL | UI `testDarkModeAndLargeText` | VoiceOver, Reducir movimiento/transparencia |
 | T75 Sin conexión | implementado sin probar | sin código de red (verificado por inspección) | — | prueba en modo avión |
@@ -84,3 +85,10 @@ Ningún criterio está **probado en iPhone real** todavía. Lista para el iPhone
 | §14 Racha (descansos neutros) | probado con datos simulados | — | `streak` | — |
 | §3.14 Resumen semanal y motivación | probado en simulador | mensajes solo con datos; semana parcial indicada | `summaryMessages`, UI `testEvidenceAndSummary` | aviso semanal real: iPhone |
 | §9 Fuentes y método | probado en simulador | E01–E07 con alcance y fecha de revisión | `EvidenceLibraryTests`, UI `testEvidenceAndSummary` | abrir enlaces (requiere red) |
+| Restauración sobre datos existentes: catálogo | probado con datos simulados | campo a campo frente a valores de fábrica; conflictos explícitos | `IndependentRestoreAuditTests`, `cleanInstallRestoresCatalogEdits`, `catalogConflict`, `catalogLocalChangeKept`, `catalogNameClash` | — |
+| Restauración sobre datos existentes: sesiones y series | probado con datos simulados | combinación por sesión, ejercicio y serie; previsión antes de restaurar | `IndependentRestoreAuditTests`, `olderThenNewerAndReverse`, `editedSetConflict`, `addedSetsBothSides`, `archiveFinishedSession`, `draftsNotAddedToClosedSession`, `deletionsAndReplace`, `attendanceNotDuplicated`, `previewMatchesRestore` | restauración real con fotos: iPhone |
+| Reemplazar con la copia | probado en simulador | segunda confirmación; nunca borra fotos | `deletionsAndReplace`, `replaceKeepsPhotos`, UI `testExportAndRestoreReport` | — |
+| Copias anteriores (fechas en segundos, sin campos v3) | probado con datos simulados | decodificador acepta ambos formatos | `legacyFormatCompatibility`, `migrationFromV1`, `migrationV2toV3` | — |
+| §12 Series por músculo en el tiempo | probado en simulador | semanas/meses/años, D/I/F, incompletos, "sin registros" ≠ 0 | `ProgressHistoryTests`, UI `testMuscleHistory`, `testHistoryDarkLargeText` | VoiceOver en iPhone |
+| §12 Evolución de repeticiones | probado en simulador | misma carga o serie más pesada; lados separados | `ProgressHistoryTests`, UI `testRepsHistory` | — |
+| §16 Ilustraciones de poses | probado en simulador (guía y lista) | 5 ilustraciones propias dibujadas en código | UI `testPoseGuide` | sobre la vista previa de la cámara: iPhone |

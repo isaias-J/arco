@@ -39,6 +39,39 @@ public struct ArchivePayload: Codable, Sendable {
     public var progressionRules: [ProgressionRule]? = nil
     public var planVersions: [PlanVersion]? = nil
     public var customAttributions: [CustomAttribution]? = nil
+    /// Precisión de las fechas. nil en copias anteriores (segundos enteros); "ms" en las actuales.
+    /// Permite comparar con seguridad qué versión de una serie es posterior al combinar.
+    public var datePrecision: String? = nil
+
+    public static let millisecondPrecision = "ms"
+
+    /// Codificador de fechas con milisegundos (ISO 8601).
+    static func makeEncoder() -> JSONEncoder {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .custom { date, enc in
+            let f = ISO8601DateFormatter()
+            f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            var c = enc.singleValueContainer()
+            try c.encode(f.string(from: date))
+        }
+        return encoder
+    }
+
+    /// Decodificador que acepta fechas con y sin milisegundos (copias anteriores).
+    static func makeDecoder() -> JSONDecoder {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .custom { dec in
+            let text = try dec.singleValueContainer().decode(String.self)
+            let fine = ISO8601DateFormatter()
+            fine.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let d = fine.date(from: text) { return d }
+            let coarse = ISO8601DateFormatter()
+            coarse.formatOptions = [.withInternetDateTime]
+            if let d = coarse.date(from: text) { return d }
+            throw DecodingError.dataCorrupted(.init(codingPath: dec.codingPath, debugDescription: "fecha no válida"))
+        }
+        return decoder
+    }
 
     public struct ProgressionRule: Codable, Sendable { public var exerciseID: String; public var enabled: Bool; public var lower: Int; public var upper: Int; public var referenceSets: Int; public var increment: Decimal; public var unit: String; public var minimumRIR: Int? }
     public struct PlanVersion: Codable, Sendable { public var id: UUID; public var validFrom: Date; public var daysJSON: String }
@@ -83,13 +116,11 @@ public struct RestorePreview: Sendable, Equatable {
     public let exportedAt: Date
     public let includesPhotos: Bool
     public let counts: [String: Int]
+    /// Qué haría cada estrategia sobre los datos actuales, sin modificar nada.
+    public let plans: [RestoreStrategy: RestoreReport]
 }
 
-/// Resultado de una restauración.
-public struct RestoreReport: Sendable, Equatable {
-    public var inserted: [String: Int] = [:]
-    public var skippedExisting: [String: Int] = [:]
-}
+/// Resultado de una restauración: ver `RestoreReport` en ArchiveMerge.swift.
 
 public enum ArchiveError: Error, Equatable {
     case photosRequireUnlockedVault
@@ -151,7 +182,8 @@ public struct ArchiveExporter {
             },
             progressionRules: all(DoubleProgressionModel.self).map { .init(exerciseID: $0.exerciseID, enabled: $0.enabled, lower: $0.repLower, upper: $0.repUpper, referenceSets: $0.referenceSets, increment: $0.increment, unit: $0.unitRaw, minimumRIR: $0.minimumRIR) },
             planVersions: all(PlanVersionModel.self).map { .init(id: $0.id, validFrom: $0.validFrom, daysJSON: $0.daysJSON) },
-            customAttributions: all(CustomAttributionModel.self).map { .init(exerciseID: $0.exerciseID, muscle: $0.muscleRaw, role: $0.roleRaw) }
+            customAttributions: all(CustomAttributionModel.self).map { .init(exerciseID: $0.exerciseID, muscle: $0.muscleRaw, role: $0.roleRaw) },
+            datePrecision: ArchivePayload.millisecondPrecision
         )
     }
 
@@ -167,8 +199,7 @@ public struct ArchiveExporter {
         let manifest = ArchiveManifest(version: PortableArchive.formatVersion, createdAt: content.exportedAt, includesPhotos: includePhotos, counts: content.counts)
         let writer = try PortableArchiveWriter(url: url, password: password, manifest: manifest, chunkCount: 1 + content.photos.count)
         do {
-            let encoder = JSONEncoder()
-            encoder.dateEncodingStrategy = .iso8601
+            let encoder = ArchivePayload.makeEncoder()
             try writer.append(try encoder.encode(content))
             for photo in content.photos {
                 guard let name = fileByID[photo.id], let store = photos else { throw ArchiveError.invalidContent("foto sin archivo") }
@@ -188,55 +219,74 @@ public struct ArchiveExporter {
 #endif
 
 /// Restauración del archivo (spec §19). Primero valida TODO (contraseña, integridad de cada
-/// fragmento, versión, referencias); solo después modifica datos, en una única transacción.
+/// fragmento, versión, referencias); solo después modifica datos, en una única transacción:
+/// si algo falla se deshacen los cambios y se borran las fotos ya escritas.
 @MainActor
 public struct ArchiveImporter {
     public let context: ModelContext
     public let photos: PhotoFileStore?
+    /// Guardado inyectable para probar fallos a mitad de restauración.
+    private let saver: (ModelContext) throws -> Void
 
-    public init(context: ModelContext, photos: PhotoFileStore?) {
+    public init(context: ModelContext, photos: PhotoFileStore?, saver: @escaping (ModelContext) throws -> Void = { try $0.save() }) {
         self.context = context
         self.photos = photos
+        self.saver = saver
     }
 
-    /// Valida el archivo completo sin modificar nada y devuelve el resumen.
+    /// Valida el archivo completo sin modificar nada y devuelve el resumen, con la previsión de
+    /// lo que haría cada estrategia sobre los datos actuales.
     public func preview(url: URL, password: String) throws -> RestorePreview {
         let (payload, _) = try readAndValidate(url: url, password: password, keepPhotos: false)
-        return RestorePreview(exportedAt: payload.exportedAt, includesPhotos: payload.includesPhotos, counts: payload.counts)
+        var plans: [RestoreStrategy: RestoreReport] = [:]
+        for strategy in RestoreStrategy.allCases {
+            plans[strategy] = try plan(payload, strategy: strategy)
+        }
+        return RestorePreview(exportedAt: payload.exportedAt, includesPhotos: payload.includesPhotos, counts: payload.counts, plans: plans)
     }
 
-    /// Restaura combinando por identificador: lo que ya existe se conserva y no se duplica
-    /// (T72). Con `replaceProfileAndSettings`, el perfil y los ajustes del archivo sustituyen a
+    /// Previsión sin escribir nada (mismas reglas que `restore`).
+    private func plan(_ payload: ArchivePayload, strategy: RestoreStrategy) throws -> RestoreReport {
+        let merger = ArchiveMerger(context: context, payload: payload, strategy: strategy, write: false)
+        let existing = Dictionary(uniqueKeysWithValues: fetchAll(PhotoCheckInModel.self).map { ($0.id, $0) })
+        for photo in payload.photos { merger.photo(photo, existing: existing[photo.id]) {} }
+        merger.countDeviceOnlyPhotos(Set(existing.keys))
+        try merger.mergeAll()
+        return merger.report
+    }
+
+    /// Restaura según `strategy` (por defecto, combinar conservando este iPhone ante conflictos;
+    /// ver `RestoreStrategy` y `ArchiveMerger`). Con `replaceProfileAndSettings` (siempre en
+    /// reemplazo), el perfil, los ajustes, la rutina y los recordatorios del archivo sustituyen a
     /// los actuales. Las fotos se vuelven a cifrar con la clave local de ESTE dispositivo (T71).
     @discardableResult
-    public func restore(url: URL, password: String, replaceProfileAndSettings: Bool) throws -> (RestoreReport, preferences: [String: String]) {
-        let (payload, photoData) = try readAndValidate(url: url, password: password, keepPhotos: false)
-        _ = photoData
-        // Segunda pasada: las imágenes se leen de nuevo, una a una, para no retenerlas todas.
-        var report = RestoreReport()
+    public func restore(url: URL, password: String, replaceProfileAndSettings: Bool, strategy: RestoreStrategy = .mergeKeepDevice) throws -> (RestoreReport, preferences: [String: String]) {
+        let (payload, _) = try readAndValidate(url: url, password: password, keepPhotos: false)
         var writtenFiles: [String] = []
         do {
+            let merger = ArchiveMerger(context: context, payload: payload, strategy: strategy, write: true)
+            if replaceProfileAndSettings || strategy == .replace {
+                applyProfileSettingsAndRoutine(payload)
+            }
+            // Segunda pasada: las imágenes se leen de nuevo, una a una, para no retenerlas todas.
             let reader = try PortableArchiveReader(url: url, password: password)
             _ = try reader.next()
-            let existingPhotos = Set(fetchAll(PhotoCheckInModel.self).map(\.id))
+            let existing = Dictionary(uniqueKeysWithValues: fetchAll(PhotoCheckInModel.self).map { ($0.id, $0) })
             for photo in payload.photos.sorted(by: { $0.chunkIndex < $1.chunkIndex }) {
                 let data = try reader.next()
-                if existingPhotos.contains(photo.id) {
-                    report.skippedExisting["photos", default: 0] += 1
-                    continue
+                try merger.photo(photo, existing: existing[photo.id]) {
+                    guard let store = photos else { throw ArchiveError.photosRequireUnlockedVault }
+                    let name = "restored-\(photo.id.uuidString).enc"
+                    try store.writePhoto(data, named: name)
+                    writtenFiles.append(name)
+                    context.insert(PhotoCheckInModel(id: photo.id, date: photo.date, poseRaw: photo.pose, encryptedFileName: name, orientationRaw: photo.orientation, mirrored: photo.mirrored, bodyWeightID: photo.bodyWeightID))
                 }
-                guard let store = photos else { throw ArchiveError.photosRequireUnlockedVault }
-                let name = "restored-\(photo.id.uuidString).enc"
-                try store.writePhoto(data, named: name)
-                writtenFiles.append(name)
-                let model = PhotoCheckInModel(id: photo.id, date: photo.date, poseRaw: photo.pose, encryptedFileName: name, orientationRaw: photo.orientation, mirrored: photo.mirrored, bodyWeightID: photo.bodyWeightID)
-                context.insert(model)
-                report.inserted["photos", default: 0] += 1
             }
             try reader.assertAtEnd()
-            try apply(payload, into: &report, replaceProfileAndSettings: replaceProfileAndSettings)
-            try context.save()
-            return (report, payload.preferences)
+            merger.countDeviceOnlyPhotos(Set(existing.keys))
+            try merger.mergeAll()
+            try saver(context)
+            return (merger.report, payload.preferences)
         } catch {
             context.rollback()
             for name in writtenFiles { try? photos?.deletePhoto(named: name) }
@@ -249,9 +299,7 @@ public struct ArchiveImporter {
     private func readAndValidate(url: URL, password: String, keepPhotos: Bool) throws -> (ArchivePayload, [Data]) {
         let reader = try PortableArchiveReader(url: url, password: password)
         let first = try reader.next()
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        guard let payload = try? decoder.decode(ArchivePayload.self, from: first) else { throw BackupError.corrupted }
+        guard let payload = try? ArchivePayload.makeDecoder().decode(ArchivePayload.self, from: first) else { throw BackupError.corrupted }
         guard payload.formatVersion == 2 else {
             throw BackupError.unsupportedVersion(found: payload.formatVersion, supported: 2)
         }
@@ -273,10 +321,14 @@ public struct ArchiveImporter {
             guard Set(values).count == values.count else { throw ArchiveError.invalidContent("\(what) duplicados") }
         }
         try unique(p.sessions.map(\.id), "sesiones")
+        try unique(p.sessions.flatMap { $0.exercises.map(\.id) }, "ejercicios de sesión")
         try unique(p.sessions.flatMap { $0.exercises.flatMap { $0.sets.map(\.id) } }, "series")
         try unique(p.bodyWeights.map(\.id), "pesajes")
         try unique(p.photos.map(\.id), "fotos")
         try unique(p.exercises.map(\.id), "ejercicios")
+        try unique(p.exerciseSettings.map(\.exerciseID), "ajustes de ejercicio")
+        try unique(p.resolutions.map(\.dayKey), "resoluciones")
+        try unique((p.progressionRules ?? []).map(\.exerciseID), "reglas de progresión")
         let indices = p.photos.map(\.chunkIndex).sorted()
         guard indices == Array(1..<(p.photos.count + 1)), chunkCount == p.photos.count + 1 else {
             throw ArchiveError.invalidContent("fragmentos de foto inconsistentes")
@@ -299,127 +351,41 @@ public struct ArchiveImporter {
         (try? context.fetch(FetchDescriptor<T>())) ?? []
     }
 
-    private func apply(_ p: ArchivePayload, into report: inout RestoreReport, replaceProfileAndSettings: Bool) throws {
-        func count(_ key: String, inserted: Bool) {
-            if inserted { report.inserted[key, default: 0] += 1 } else { report.skippedExisting[key, default: 0] += 1 }
+    /// Perfil, ajustes, rutina (plantillas y versiones del plan) y recordatorios: se sustituyen
+    /// por los del archivo solo con la opción explícita o en reemplazo.
+    private func applyProfileSettingsAndRoutine(_ p: ArchivePayload) {
+        for old in fetchAll(UserProfileModel.self) { context.delete(old) }
+        for prof in p.profiles {
+            context.insert(UserProfileModel(id: prof.id, displayName: prof.displayName, birthDate: prof.birthDate, experience: prof.experience, goalDescription: prof.goal, gender: prof.gender))
         }
-
-        if replaceProfileAndSettings {
-            for old in fetchAll(UserProfileModel.self) { context.delete(old) }
-            for prof in p.profiles {
-                context.insert(UserProfileModel(id: prof.id, displayName: prof.displayName, birthDate: prof.birthDate, experience: prof.experience, goalDescription: prof.goal, gender: prof.gender))
-            }
-            if let s = p.settings.first {
-                let target = fetchAll(AppSettingsModel.self).first ?? {
-                    let m = AppSettingsModel(); context.insert(m); return m
-                }()
-                target.languageCode = s.languageCode
-                target.massUnitRaw = s.massUnit
-                target.lengthUnitRaw = s.lengthUnit
-                target.themeRaw = s.theme
-                target.weekStartsMonday = s.weekStartsMonday
-                target.hapticsEnabled = s.hapticsEnabled
-                target.onboardingCompleted = true
-            }
-            let templates = Dictionary(uniqueKeysWithValues: fetchAll(RoutineTemplateModel.self).map { ($0.id, $0) })
-            for t in p.templates {
-                if let existing = templates[t.id] {
-                    existing.name = t.name; existing.weekday = t.weekday; existing.groupsJoined = t.groups
-                    existing.preferredExerciseIDsJoined = t.preferred; existing.isRestDay = t.isRest
-                } else {
-                    context.insert(RoutineTemplateModel(id: t.id, name: t.name, weekday: t.weekday, groupsJoined: t.groups, preferredExerciseIDsJoined: t.preferred, isRestDay: t.isRest))
-                }
-            }
-            for old in fetchAll(ReminderRuleModel.self) { context.delete(old) }
-            for r in p.reminderRules {
-                context.insert(ReminderRuleModel(id: r.id, categoryRaw: r.category, weekday: r.weekday, hour: r.hour, minute: r.minute, enabled: r.enabled, timeZoneID: r.timeZoneID))
+        if let s = p.settings.first {
+            let target = fetchAll(AppSettingsModel.self).first ?? {
+                let m = AppSettingsModel(); context.insert(m); return m
+            }()
+            target.languageCode = s.languageCode
+            target.massUnitRaw = s.massUnit
+            target.lengthUnitRaw = s.lengthUnit
+            target.themeRaw = s.theme
+            target.weekStartsMonday = s.weekStartsMonday
+            target.hapticsEnabled = s.hapticsEnabled
+            target.onboardingCompleted = true
+        }
+        let templates = Dictionary(uniqueKeysWithValues: fetchAll(RoutineTemplateModel.self).map { ($0.id, $0) })
+        for t in p.templates {
+            if let existing = templates[t.id] {
+                existing.name = t.name; existing.weekday = t.weekday; existing.groupsJoined = t.groups
+                existing.preferredExerciseIDsJoined = t.preferred; existing.isRestDay = t.isRest
+            } else {
+                context.insert(RoutineTemplateModel(id: t.id, name: t.name, weekday: t.weekday, groupsJoined: t.groups, preferredExerciseIDsJoined: t.preferred, isRestDay: t.isRest))
             }
         }
-
-        let exerciseIDs = Set(fetchAll(ExerciseModel.self).map(\.id))
-        for e in p.exercises {
-            let isNew = !exerciseIDs.contains(e.id)
-            if isNew {
-                context.insert(ExerciseModel(id: e.id, name: e.name, aliasesJoined: e.aliases, loadTypeRaw: e.loadType, patternRaw: e.pattern, originRaw: e.origin, instructions: e.instructions, archived: e.archived))
-            }
-            count("exercises", inserted: isNew)
+        for old in fetchAll(ReminderRuleModel.self) { context.delete(old) }
+        for r in p.reminderRules {
+            context.insert(ReminderRuleModel(id: r.id, categoryRaw: r.category, weekday: r.weekday, hour: r.hour, minute: r.minute, enabled: r.enabled, timeZoneID: r.timeZoneID))
         }
-
-        let settingIDs = Set(fetchAll(ExerciseSettingsModel.self).map(\.exerciseID))
-        for s in p.exerciseSettings where !settingIDs.contains(s.exerciseID) {
-            context.insert(ExerciseSettingsModel(exerciseID: s.exerciseID, conventionRaw: s.convention, sideModeRaw: s.sideMode, incrementAmount: s.increment, barWeight: s.barWeight, unitRaw: s.unit, defaultVariant: s.defaultVariant))
-        }
-
-        let sessionIDs = Set(fetchAll(WorkoutSessionModel.self).map(\.id))
-        for s in p.sessions {
-            let isNew = !sessionIDs.contains(s.id)
-            count("sessions", inserted: isNew)
-            guard isNew else { continue }
-            let session = WorkoutSessionModel(id: s.id, startedAt: s.startedAt, endedAt: s.endedAt, stateRaw: s.state, trainingDate: s.trainingDate, originTimeZoneID: s.timeZone, templateID: s.templateID)
-            context.insert(session)
-            for e in s.exercises {
-                let se = SessionExerciseModel(id: e.id, exerciseID: e.exerciseID, variantKey: e.variantKey, order: e.order)
-                context.insert(se)
-                se.session = session
-                session.exercises.append(se)
-                for r in e.sets {
-                    let m = SetRecordModel(id: r.id, loadAmount: r.loadAmount, loadUnitRaw: r.unit, loadConventionRaw: r.convention, reps: r.reps, typeRaw: r.type, stateRaw: r.state, sideRaw: r.side, rirKind: r.rirKind, rirValue: r.rirValue, performedAt: r.performedAt, attributionMajor: r.attrMajor, attributionMinor: r.attrMinor)
-                    context.insert(m)
-                    m.sessionExercise = se
-                    se.sets.append(m)
-                }
-            }
-        }
-
-        let weightIDs = Set(fetchAll(BodyWeightModel.self).map(\.id))
-        for w in p.bodyWeights {
-            let isNew = !weightIDs.contains(w.id)
-            count("bodyWeights", inserted: isNew)
-            if isNew {
-                context.insert(BodyWeightModel(id: w.id, measurementDate: w.measurementDate, enteredAt: w.enteredAt, amount: w.amount, unitRaw: w.unit, isEstimated: w.isEstimated, photoCheckInID: w.photoCheckInID))
-            }
-        }
-        let heightIDs = Set(fetchAll(HeightModel.self).map(\.id))
-        for h in p.heights where !heightIDs.contains(h.id) {
-            context.insert(HeightModel(id: h.id, date: h.date, amount: h.amount, unitRaw: h.unit))
-            count("heights", inserted: true)
-        }
-        let measurementIDs = Set(fetchAll(BodyMeasurementModel.self).map(\.id))
-        for m in p.measurements where !measurementIDs.contains(m.id) {
-            context.insert(BodyMeasurementModel(id: m.id, typeKey: m.typeKey, sideRaw: m.side, protocolNote: m.protocolNote, amount: m.amount, unitRaw: m.unit, date: m.date))
-            count("measurements", inserted: true)
-        }
-        let attendanceIDs = Set(fetchAll(AttendanceEventModel.self).map(\.id))
-        for a in p.attendance {
-            let isNew = !attendanceIDs.contains(a.id)
-            count("attendance", inserted: isNew)
-            if isNew {
-                context.insert(AttendanceEventModel(id: a.id, trainingDate: a.trainingDate, sourceRaw: a.source, sessionID: a.sessionID, isPartial: a.isPartial))
-            }
-        }
-        let resolutionDays = Set(fetchAll(AttendanceResolutionModel.self).map(\.dayKey))
-        for r in p.resolutions where !resolutionDays.contains(r.dayKey) {
-            context.insert(AttendanceResolutionModel(id: r.id, dayKey: r.dayKey, kindRaw: r.kind, createdAt: r.createdAt))
-        }
-        let overrideIDs = Set(fetchAll(ReminderOverrideModel.self).map(\.id))
-        for o in p.reminderOverrides where !overrideIDs.contains(o.id) {
-            context.insert(ReminderOverrideModel(id: o.id, categoryRaw: o.category, dayKey: o.dayKey, hour: o.hour, minute: o.minute, enabled: o.enabled))
-        }
-        let ruleIDs = Set(fetchAll(DoubleProgressionModel.self).map(\.exerciseID))
-        for r in p.progressionRules ?? [] where !ruleIDs.contains(r.exerciseID) {
-            context.insert(DoubleProgressionModel(exerciseID: r.exerciseID, enabled: r.enabled, repLower: r.lower, repUpper: r.upper, referenceSets: r.referenceSets, increment: r.increment, unitRaw: r.unit, minimumRIR: r.minimumRIR))
-        }
-        let customIDs = Set(fetchAll(CustomAttributionModel.self).map(\.exerciseID))
-        for a in p.customAttributions ?? [] where !customIDs.contains(a.exerciseID) {
-            context.insert(CustomAttributionModel(exerciseID: a.exerciseID, muscleRaw: a.muscle, roleRaw: a.role))
-        }
-        if replaceProfileAndSettings, let versions = p.planVersions, !versions.isEmpty {
+        if let versions = p.planVersions, !versions.isEmpty {
             for old in fetchAll(PlanVersionModel.self) { context.delete(old) }
             for v in versions { context.insert(PlanVersionModel(id: v.id, validFrom: v.validFrom, daysJSON: v.daysJSON)) }
-        }
-        let goalIDs = Set(fetchAll(WeeklyGoalModel.self).map(\.id))
-        for g in p.goals where !goalIDs.contains(g.id) {
-            context.insert(WeeklyGoalModel(id: g.id, muscleRaw: g.muscle, methodRaw: g.method, target: g.target, validFrom: g.validFrom, validTo: g.validTo, sourceRaw: g.source))
         }
     }
 }

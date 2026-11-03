@@ -30,6 +30,9 @@ o anota lo que viste distinto. Si algo falla, una captura de pantalla y la hora 
    - **Esperado:** Arco explica que necesita la cámara y ofrece **Abrir Ajustes**; no se bloquea ni pierde nada.
 3. Ajustes → Arco → Cámara: activar. Vuelve a **Tomar fotos**.
 4. Haz la pose frontal relajada, después lateral, con el temporizador si quieres.
+- **Esperado:** arriba a la izquierda de la vista previa ves la silueta de la pose y sus pasos;
+  "Menos" la reduce y "Cómo colocarte" la amplía. La silueta y la cuadrícula **no** aparecen en la
+  foto guardada. En una segunda revisión, "superponer la foto anterior" sigue funcionando.
 5. Al terminar, elige **Vincular último peso** o escribe un peso y **Guardar peso**.
 - **Esperado:** las poses quedan con un solo pesaje vinculado (no uno por foto).
 6. Abre la app **Fotos** de Apple y busca en Recientes y en Ocultos.
@@ -69,15 +72,36 @@ o anota lo que viste distinto. Si algo falla, una captura de pantalla y la hora 
 - **Esperado:** el estado dice desactivado y ofrece **Abrir Ajustes del sistema**; el resto de la app funciona.
 
 ## 5. Copia cifrada y reinstalación (T65, T70–T72)
-1. Desbloquea la bóveda. Perfil → Copia de seguridad → contraseña de 8+ caracteres → activa
-   **Incluir fotos** → **Crear copia cifrada** → guarda en Archivos (En mi iPhone).
+Hazlo primero con datos ficticios. No borres la app con datos reales hasta comprobar que la copia
+se abre y muestra lo esperado en la previsión; guarda la copia fuera del iPhone (Mac o nube) además.
+1. Antes de exportar, en Catálogo renombra un ejercicio (p. ej. "Curl martillo" → "Martillo prueba")
+   y archiva otro. Desbloquea la bóveda. Perfil → Copia de seguridad → contraseña de 8+ caracteres →
+   activa **Incluir fotos** → **Crear copia cifrada** → guarda en Archivos (En mi iPhone).
 - **Esperado:** la pantalla dice "Fotos: sí" y el archivo `Arco-<fecha>.arcobk` aparece en Archivos.
 2. Prueba restaurar con una contraseña **incorrecta**.
-- **Esperado:** mensaje de error; nada cambia.
-3. Borra Arco del iPhone (mantener pulsado el icono → Eliminar app). Vuelve a instalar con Run.
-4. En Configuración, **Restaurar desde una copia de Arco** → elige el archivo → contraseña correcta → **Restaurar**.
+- **Esperado:** "Contraseña incorrecta. No se modificó ningún dato."
+3. Restaura con la contraseña correcta **sin borrar nada**.
+- **Esperado:** la previsión dice "Ya están aquí sin cambios: N registros" y no promete añadir nada.
+  Elige **Reemplazar con la copia** → **Reemplazar**: aparece una segunda confirmación que dice qué
+  se eliminaría. Pulsa **Cancelar**, vuelve a **Combinar (recomendado)** → **Restaurar**.
+  El mensaje empieza por "Restauración terminada." y dice "No había registros nuevos".
+4. Registra una serie nueva, confirma un borrador pendiente si tienes uno y restaura otra vez la copia
+   anterior con **Combinar**.
+- **Esperado:** la previsión indica que se conserva la versión de este iPhone; la serie nueva sigue.
+5. Borra Arco del iPhone (mantener pulsado el icono → Eliminar app). Vuelve a instalar con Run.
+6. En Configuración, **Restaurar desde una copia de Arco** → elige el archivo → contraseña correcta →
+   **Restaurar**.
 - **Esperado:** vuelven sesiones, series, pesos, asistencia, rutina, ejercicios personalizados y fotos;
-  las fotos se abren tras crear un PIN nuevo. Restaurar el mismo archivo otra vez no duplica nada.
+  el ejercicio renombrado conserva su nombre y el archivado sigue archivado. Las fotos se abren tras
+  crear un PIN nuevo. Restaurar el mismo archivo otra vez no duplica nada.
+
+## 5b. Gráficas nuevas
+1. Progreso → **Series por músculo en el tiempo**: elige un grupo, cambia Semanas/Meses/Años y el método.
+- **Esperado:** la semana o el mes en curso aparecen atenuados como "incompleto"; las semanas en las que
+  no registraste nada salen como raya y "sin registros", no como cero.
+2. Progreso → un ejercicio → **Repeticiones por sesión**.
+- **Esperado:** el selector "Misma carga: X" muestra la mejor serie de cada sesión con esa carga; "Serie
+  más pesada" avisa de que la carga cambia y la tabla indica la carga de cada punto.
 
 ## 6. Sin conexión (T75)
 1. Activa Modo avión. Usa Arco: registra series, mira Progreso, abre la bóveda, crea una copia.

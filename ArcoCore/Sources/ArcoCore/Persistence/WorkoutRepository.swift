@@ -557,6 +557,18 @@ public struct WorkoutRepository {
 
     // MARK: - Asistencia automática (T34, T37)
 
+    /// Deja la asistencia automática de la sesión coherente con sus series actuales: la crea si
+    /// hay una serie de trabajo elegible y la retira si ya no la hay (usado al restaurar).
+    public func syncAutomaticAttendance(for session: WorkoutSessionModel) {
+        createAutomaticAttendanceIfNeeded(for: session)
+        reconcileAutomaticAttendance(for: session)
+        let sid = session.id
+        let predicate = #Predicate<AttendanceEventModel> { $0.sessionID == sid && $0.sourceRaw == "automatic" }
+        for event in (try? context.fetch(FetchDescriptor(predicate: predicate))) ?? [] {
+            event.isPartial = session.stateRaw == "partial"
+        }
+    }
+
     private func createAutomaticAttendanceIfNeeded(for session: WorkoutSessionModel) {
         let sets = allDomainSets(in: session)
         guard AttendanceEngine.qualifiesForAutomaticAttendance(sessionSets: sets) else { return }

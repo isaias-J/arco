@@ -415,6 +415,8 @@ struct CameraCaptureView: View {
     @State private var controller = CameraController()
     @State private var timerSeconds = 0
     @State private var showOverlay = false
+    /// Pasos de la pose desplegados sobre la vista previa.
+    @State private var showPoseSteps = true
     @State private var overlayImage: UIImage?
     /// Caché mínima propia: solo la imagen de superposición.
     @State private var overlayLoader = VaultImageLoader(maxEntries: 1)
@@ -526,17 +528,31 @@ struct CameraCaptureView: View {
         }
     }
 
-    /// Insignia de referencia de pose superpuesta (spec §16 "referencia de pose").
+    /// Referencia de pose superpuesta (spec §16): ilustración original de la pose, nombre y
+    /// pasos breves. Se puede ocultar para no tapar la vista previa; nunca entra en la foto.
     private var poseReferenceBadge: some View {
         VStack {
-            HStack(spacing: Spacing.sm) {
-                Image(systemName: pose.referenceSymbol)
-                    .font(.title3)
+            HStack(alignment: .top, spacing: Spacing.sm) {
+                if pose.hasIllustration {
+                    PoseIllustration(pose: pose, color: .white)
+                        .frame(width: showPoseSteps ? 54 : 34, height: showPoseSteps ? 108 : 68)
+                } else {
+                    Image(systemName: pose.referenceSymbol).font(.title3)
+                }
                 VStack(alignment: .leading, spacing: 2) {
                     Text(pose.displayName).font(.subheadline.bold())
-                    Text(pose.shortDescription)
-                        .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.85))
+                    if showPoseSteps {
+                        ForEach(pose.steps, id: \.self) { step in
+                            Text("• \(step)").font(.caption2).foregroundStyle(.white.opacity(0.9))
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    } else {
+                        Text(pose.shortDescription).font(.caption2).foregroundStyle(.white.opacity(0.85))
+                    }
+                    Button(showPoseSteps ? "Menos" : "Cómo colocarte") { showPoseSteps.toggle() }
+                        .font(.caption2.bold())
+                        .padding(.top, 2)
+                        .accessibilityIdentifier("camera.poseSteps")
                 }
             }
             .padding(Spacing.sm)
@@ -547,7 +563,7 @@ struct CameraCaptureView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Pose \(pose.displayName). \(pose.shortDescription)")
+        .accessibilityLabel("Pose \(pose.displayName). \(pose.steps.joined(separator: " "))")
     }
 
     /// Controles de disparo y temporizador fotográfico.

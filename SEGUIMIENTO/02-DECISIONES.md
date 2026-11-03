@@ -49,3 +49,16 @@
 - La fecha en que el usuario empezó a entrenar (maestro §2) se pide opcionalmente en la
   configuración y se guarda como preferencia local que viaja en la copia. Es informativa y no
   altera la asistencia. Alternativa descartada: un esquema v4 solo para este dato.
+
+## 2026-11-03 — Restauración sobre datos existentes (segunda revisión)
+- Combinar por registro (sesión, ejercicio de sesión, serie, ejercicio del catálogo, etc.) en
+  lugar de omitir lo que ya existe. Solo se decide sin preguntar cuando los datos permiten ordenar
+  las versiones: valores de fábrica del catálogo frente a valores del usuario, hora de confirmación
+  de una serie frente a su borrador, y cierre de sesión (definitivo). El resto son conflictos que
+  se resuelven con la opción elegida por el usuario antes de restaurar, tras ver la previsión.
+- Se añadió "Reemplazar con la copia" con segunda confirmación; nunca borra fotos ni ejercicios
+  del catálogo. Alternativa descartada: guardar marcas de modificación o registros de borrado,
+  que exigía un esquema v4 y no ayudaba con las copias ya creadas.
+- Las copias nuevas guardan fechas con milisegundos (`datePrecision = "ms"`); el lector acepta las
+  anteriores en segundos. El número de formato sigue en 2.
+- Ver tabla completa en `10-SEGUNDA-REVISION.md`.

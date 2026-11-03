@@ -8,10 +8,10 @@
 //  ----------------------------
 //  - Poses base: frontal relajado, lateral y espalda. Adicionales opcionales:
 //    doble bíceps frontal, bíceps de perfil y poses personalizadas (spec §16).
-//  - Cada pose ofrece un nombre y una descripción sencilla, NEUTRA y NO
-//    sexualizada (spec §16 "ofrecer una ilustración original, neutra y no
-//    sexualizada"). La "ilustración" se representa aquí con un símbolo SF neutro
-//    como referencia de encuadre; no se usa reconocimiento del cuerpo.
+//  - Cada pose ofrece un nombre, una descripción sencilla, NEUTRA y NO
+//    sexualizada y una ilustración original dibujada en código
+//    (`PoseIllustration`, spec §16). No se usa reconocimiento del cuerpo.
+//    Las poses personalizadas usan un símbolo genérico.
 //  - `custom(String)` permite poses adicionales del usuario sin imponerlas.
 //
 

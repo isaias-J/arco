@@ -15,16 +15,16 @@ Arco.xcodeproj          proyecto (abrir este)
 App/Arco/               app SwiftUI: vistas, servicios del sistema (cámara, avisos, Face ID, cifrado)
 ArcoCore/               paquete Swift: dominio, ciencia, analítica, modelos SwiftData, repositorios,
                         copia cifrada portable, planificador de avisos
-ArcoCore/Tests/         97 pruebas (lógica e integración con SwiftData real)
-AppUITests/             14 recorridos de interfaz (XCUITest)
+ArcoCore/Tests/         123 pruebas (lógica e integración con SwiftData real)
+AppUITests/             19 recorridos de interfaz (XCUITest)
 SEGUIMIENTO/            requisitos, decisiones, matriz de pruebas, pendientes, seguridad, etapas,
-                        verificaciones para el iPhone (09-VERIFICACION-IPHONE.md)
+                        verificaciones para el iPhone (09), segunda revisión (10)
 scripts/preflight-publico.sh   revisión de seguridad antes de cada push
 ```
 
 ## 3. Compilar y probar
 ```bash
-cd ArcoCore && swift test                         # 97 pruebas, sin simulador
+cd ArcoCore && swift test                         # 123 pruebas, sin simulador
 
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 xcodebuild -project Arco.xcodeproj -scheme Arco \
@@ -36,6 +36,8 @@ xcodebuild -project Arco.xcodeproj -scheme Arco -destination 'platform=iOS Simul
 ```
 Los recorridos de interfaz arrancan la app con `-arco-uitest-reset`, que borra la base, el PIN y
 la bóveda **del simulador donde se ejecutan**. No los ejecutes en un dispositivo con datos reales.
+Ejecútalos con la firma habitual del simulador: con `CODE_SIGNING_ALLOWED=NO` el recorrido del PIN
+falla (causa exacta no demostrada; ver `SEGUIMIENTO/10-SEGUNDA-REVISION.md`).
 
 ## 4. Instalar en el iPhone
 1. Abre `Arco.xcodeproj` en Xcode → target **Arco** → **Signing & Capabilities**.
@@ -56,13 +58,17 @@ Con una cuenta gratuita la instalación caduca a los 7 días.
   sesiones y series, ejercicios personalizados, rutina, perfil, ajustes, pesos, alturas, medidas,
   asistencia, descansos, recordatorios y metas; **las fotos solo si la bóveda está desbloqueada y
   marcas la opción** (la pantalla indica "Fotos: sí/no"). Restaurar valida todo el archivo antes
-  de cambiar nada, no duplica lo existente y vuelve a cifrar las fotos con la clave del nuevo
-  dispositivo. También puedes restaurar desde la primera pantalla de configuración.
+  de cambiar nada y vuelve a cifrar las fotos con la clave del nuevo dispositivo. Antes de
+  restaurar muestra qué se añadirá, qué ya está, qué conflictos hay y qué se eliminaría. Opciones:
+  **Combinar** (recomendado; ante un conflicto conserva este iPhone), **Combinar usando la copia en
+  los conflictos**, o **Reemplazar con la copia** (segunda confirmación; nunca borra fotos). Reglas
+  completas en `SEGUIMIENTO/10-SEGUNDA-REVISION.md`. También puedes restaurar desde la primera
+  pantalla de configuración.
 - Si pierdes el iPhone sin una copia exportada, los datos y fotos no se pueden recuperar.
 
 ## 6. Qué está verificado
 Detalle por criterio en `SEGUIMIENTO/03-PRUEBAS.md`.
-- **Con datos simulados (97 pruebas):** conteo muscular y pares unilaterales, atribuciones
+- **Con datos simulados (123 pruebas):** conteo muscular y pares unilaterales, atribuciones
   (incluidas las personalizadas), récords, gráficas sin asistencia, peso e IMC, asistencia y
   descansos, días de la rutina, historial de versiones de la rutina en la adherencia y la racha,
   planificador de avisos (cancelación, aplazamiento, horarios por día, fechas límite), catálogo
@@ -70,13 +76,18 @@ Detalle por criterio en `SEGUIMIENTO/03-PRUEBAS.md`.
   progresión, resumen semanal, fuentes, registro de series con fallo de guardado, persistencia en
   disco, migraciones v1→v2→v3, exclusión de copias de la base, y copia cifrada completa con fotos
   restaurada en una instalación limpia con otra clave, con contraseña incorrecta, archivo dañado
-  y reimportación.
-- **En el simulador aislado (14 recorridos):** primera apertura sin datos de demostración y fecha
+  y reimportación; restauración sobre datos existentes (catálogo, sesiones y series en ambos
+  órdenes, conflictos, borrados, reemplazo, copias anteriores, fallo a mitad); curvas de series
+  por músculo y de repeticiones.
+- **En el simulador aislado (19 recorridos, una sola corrida):** primera apertura sin datos de demostración y fecha
   de inicio opcional; registrar una serie, cerrar la app y recuperarla; asistencia creada por la
   serie; "Hoy descansé"; validación de peso; PIN de la bóveda; copia honesta sobre las fotos; tema
   oscuro con texto grande; sugerencia de énfasis explicada y rechazable; renombrar y archivar un
   ejercicio conservando su historial; editar la rutina desde hoy; sustituir un ejercicio en la
-  sesión; aviso de doble progresión sin cambiar pesos; resumen semanal y fuentes.
+  sesión; aviso de doble progresión sin cambiar pesos; resumen semanal y fuentes; series por músculo
+  en el tiempo y repeticiones (también en oscuro con texto grande); guía de poses; exportar y
+  restaurar con el selector de Archivos (contraseña incorrecta, previsión, reemplazo con
+  confirmación, mensaje final).
 
 ## 7. Pendiente de comprobar en tu iPhone
 Pasos exactos y resultado esperado en `SEGUIMIENTO/09-VERIFICACION-IPHONE.md`: cámara y permiso,
@@ -85,7 +96,8 @@ apps, entrega real de avisos y sus botones, copia a Archivos y restauración tra
 borrado de fotos, modo avión, VoiceOver y rendimiento con muchas fotos.
 
 ## 8. Limitaciones conocidas
-- Las poses usan símbolos genéricos, no ilustraciones propias.
+- Las ilustraciones de poses son siluetas esquemáticas; las poses personalizadas usan un símbolo genérico.
+- Combinar una copia anterior puede devolver un pesaje o un registro de asistencia que borraste después (no se guarda el borrado); "Reemplazar" deja exactamente la copia.
 - Los avisos se programan para 4 semanas; sin abrir la app en ese tiempo, se detienen.
 - Exportar con muchas fotos se hace en primer plano y puede tardar.
 - Solo existe la atribución muscular v1.0; no hay pantalla para recalcular con otra versión.
