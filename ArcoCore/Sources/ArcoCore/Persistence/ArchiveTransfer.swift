@@ -35,6 +35,14 @@ public struct ArchivePayload: Codable, Sendable {
     public var reminderOverrides: [ReminderOverrideDTO]
     public var goals: [Goal]
     public var photos: [Photo]
+    /// Añadidos con el esquema v3; opcionales para leer copias anteriores.
+    public var progressionRules: [ProgressionRule]? = nil
+    public var planVersions: [PlanVersion]? = nil
+    public var customAttributions: [CustomAttribution]? = nil
+
+    public struct ProgressionRule: Codable, Sendable { public var exerciseID: String; public var enabled: Bool; public var lower: Int; public var upper: Int; public var referenceSets: Int; public var increment: Decimal; public var unit: String; public var minimumRIR: Int? }
+    public struct PlanVersion: Codable, Sendable { public var id: UUID; public var validFrom: Date; public var daysJSON: String }
+    public struct CustomAttribution: Codable, Sendable { public var exerciseID: String; public var muscle: String; public var role: String }
 
     public struct Profile: Codable, Sendable { public var id: UUID; public var displayName: String?; public var birthDate: Date?; public var experience: String?; public var goal: String?; public var gender: String? }
     public struct Settings: Codable, Sendable { public var languageCode: String; public var massUnit: String; public var lengthUnit: String; public var theme: String; public var weekStartsMonday: Bool; public var hapticsEnabled: Bool; public var onboardingCompleted: Bool }
@@ -140,7 +148,10 @@ public struct ArchiveExporter {
             goals: all(WeeklyGoalModel.self).map { .init(id: $0.id, muscle: $0.muscleRaw, method: $0.methodRaw, target: $0.target, validFrom: $0.validFrom, validTo: $0.validTo, source: $0.sourceRaw) },
             photos: photoModels.enumerated().map { i, p in
                 .init(id: p.id, date: p.date, pose: p.poseRaw, orientation: p.orientationRaw, mirrored: p.mirrored, bodyWeightID: p.bodyWeightID, chunkIndex: i + 1)
-            }
+            },
+            progressionRules: all(DoubleProgressionModel.self).map { .init(exerciseID: $0.exerciseID, enabled: $0.enabled, lower: $0.repLower, upper: $0.repUpper, referenceSets: $0.referenceSets, increment: $0.increment, unit: $0.unitRaw, minimumRIR: $0.minimumRIR) },
+            planVersions: all(PlanVersionModel.self).map { .init(id: $0.id, validFrom: $0.validFrom, daysJSON: $0.daysJSON) },
+            customAttributions: all(CustomAttributionModel.self).map { .init(exerciseID: $0.exerciseID, muscle: $0.muscleRaw, role: $0.roleRaw) }
         )
     }
 
@@ -393,6 +404,18 @@ public struct ArchiveImporter {
         let overrideIDs = Set(fetchAll(ReminderOverrideModel.self).map(\.id))
         for o in p.reminderOverrides where !overrideIDs.contains(o.id) {
             context.insert(ReminderOverrideModel(id: o.id, categoryRaw: o.category, dayKey: o.dayKey, hour: o.hour, minute: o.minute, enabled: o.enabled))
+        }
+        let ruleIDs = Set(fetchAll(DoubleProgressionModel.self).map(\.exerciseID))
+        for r in p.progressionRules ?? [] where !ruleIDs.contains(r.exerciseID) {
+            context.insert(DoubleProgressionModel(exerciseID: r.exerciseID, enabled: r.enabled, repLower: r.lower, repUpper: r.upper, referenceSets: r.referenceSets, increment: r.increment, unitRaw: r.unit, minimumRIR: r.minimumRIR))
+        }
+        let customIDs = Set(fetchAll(CustomAttributionModel.self).map(\.exerciseID))
+        for a in p.customAttributions ?? [] where !customIDs.contains(a.exerciseID) {
+            context.insert(CustomAttributionModel(exerciseID: a.exerciseID, muscleRaw: a.muscle, roleRaw: a.role))
+        }
+        if replaceProfileAndSettings, let versions = p.planVersions, !versions.isEmpty {
+            for old in fetchAll(PlanVersionModel.self) { context.delete(old) }
+            for v in versions { context.insert(PlanVersionModel(id: v.id, validFrom: v.validFrom, daysJSON: v.daysJSON)) }
         }
         let goalIDs = Set(fetchAll(WeeklyGoalModel.self).map(\.id))
         for g in p.goals where !goalIDs.contains(g.id) {

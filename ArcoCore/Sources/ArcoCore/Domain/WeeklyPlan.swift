@@ -34,7 +34,7 @@ public enum Weekday: Int, CaseIterable, Sendable, Codable {
 
 /// Plan semanal: qué días se entrena y qué días son descanso planificado (spec §2, §14).
 public struct WeeklyPlan: Sendable, Equatable {
-    public struct Day: Sendable, Equatable {
+    public struct Day: Sendable, Equatable, Codable {
         public let weekday: Weekday
         public let isRest: Bool
         public let groups: [MuscleGroup]

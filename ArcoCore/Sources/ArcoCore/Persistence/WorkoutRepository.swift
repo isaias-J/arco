@@ -108,6 +108,33 @@ public struct WorkoutRepository {
         return true
     }
 
+    /// Sustituye un ejercicio de la sesión por otro (spec §3.3). Solo si aún no tiene series
+    /// realizadas: el trabajo hecho nunca se reasigna a otro ejercicio. Devuelve `false` si no
+    /// se pudo (en ese caso, añade el nuevo como ejercicio aparte).
+    @discardableResult
+    public func substitute(_ se: SessionExerciseModel, with exerciseID: String) -> Bool {
+        guard !se.sets.contains(where: { $0.stateRaw == SetState.completed.rawValue }) else { return false }
+        for d in se.sets { context.delete(d) }
+        se.sets.removeAll()
+        se.exerciseID = exerciseID
+        se.variantKey = defaultVariant(for: exerciseID)
+        if let session = se.session { prefillDrafts(se, excluding: session) }
+        try? saver(context)
+        return true
+    }
+
+    /// Mueve un ejercicio una posición arriba (-1) o abajo (+1).
+    public func move(_ se: SessionExerciseModel, by offset: Int) {
+        guard let session = se.session else { return }
+        var ordered = session.exercises.sorted { $0.order < $1.order }
+        guard let i = ordered.firstIndex(where: { $0.id == se.id }) else { return }
+        let j = min(max(0, i + offset), ordered.count - 1)
+        guard i != j else { return }
+        ordered.swapAt(i, j)
+        for (index, item) in ordered.enumerated() { item.order = index }
+        try? saver(context)
+    }
+
     /// Reordena ejercicios de la sesión.
     public func reorder(_ session: WorkoutSessionModel, orderedIDs: [UUID]) {
         for (index, id) in orderedIDs.enumerated() {

@@ -103,6 +103,44 @@ public struct DoubleProgressionConfig: Sendable, Equatable {
 }
 
 public enum DoubleProgression {
+    /// Resultado explicable de la regla (spec §13).
+    public enum Evaluation: Sendable, Equatable {
+        case disabled
+        /// No hay series suficientes para evaluar.
+        case notEnoughSets(have: Int, need: Int)
+        /// Solo `reached` de `need` series alcanzaron el extremo superior.
+        case notMet(reached: Int, need: Int)
+        /// Falta el RIR declarado que exige el criterio de esfuerzo.
+        case effortUnknown
+        /// Todas las series de referencia cumplieron la regla: puede considerarse subir.
+        case met(incrementKilograms: Decimal)
+    }
+
+    /// Evalúa la regla sobre las series de trabajo de la última sesión comparable. No cambia
+    /// pesos: solo informa. `minimumRIR`: si se indica, cada serie de referencia debe haberse
+    /// hecho con al menos ese margen declarado (RIR exacto o "N o más").
+    public static func evaluate(config: DoubleProgressionConfig, minimumRIR: Int? = nil, workingSets: [SetRecord]) -> Evaluation {
+        guard config.enabled else { return .disabled }
+        let eligible = workingSets.filter { $0.isEligibleForWorkCount }.sorted { $0.performedAt < $1.performedAt }
+        guard eligible.count >= config.referenceSets else {
+            return .notEnoughSets(have: eligible.count, need: config.referenceSets)
+        }
+        let reference = Array(eligible.prefix(config.referenceSets))
+        let reached = reference.filter { ($0.reps ?? 0) >= config.repRangeUpper }.count
+        guard reached == config.referenceSets else { return .notMet(reached: reached, need: config.referenceSets) }
+        if let minimumRIR {
+            let ok = reference.allSatisfy { set in
+                switch set.rir {
+                case .exact(let v): return v >= minimumRIR
+                case .atLeast(let v): return v >= minimumRIR
+                default: return false
+                }
+            }
+            if !ok { return .effortUnknown }
+        }
+        return .met(incrementKilograms: config.incrementKilograms)
+    }
+
     /// Sugiere incremento SOLO si TODAS las series de referencia alcanzan el extremo superior
     /// del rango bajo condiciones comparables (spec §13, T30). Una sola serie no basta.
     /// No cambia pesos: solo sugiere.

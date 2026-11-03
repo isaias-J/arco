@@ -5,7 +5,7 @@ import SwiftData
 public enum PersistenceController {
 
     /// Esquema vigente (v2).
-    public static let schema = Schema(versionedSchema: ArcoSchemaV2.self)
+    public static let schema = Schema(versionedSchema: ArcoSchemaV3.self)
 
     /// Ubicación de la base. Es la misma ruta que SwiftData usa por defecto
     /// (`Application Support/default.store`), fijada explícitamente para poder aplicarle la

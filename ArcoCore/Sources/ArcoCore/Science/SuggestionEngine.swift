@@ -17,6 +17,8 @@ public enum SuggestionEngine {
         public let pinnedExerciseIDs: Set<String>
         /// Exclusiones explícitas.
         public let excludedExerciseIDs: Set<String>
+        /// Atribuciones personalizadas por el usuario (prevalecen sobre el catálogo).
+        public var customRuleSets: [String: AttributionRuleSet] = [:]
 
         public init(
             plannedGroups: [MuscleGroup],
@@ -90,7 +92,7 @@ public enum SuggestionEngine {
         // Para cada músculo candidato, calcular exposición directa y ejercicios que lo cubren.
         func exercisesTargeting(_ muscle: Muscle) -> [String] {
             available.compactMap { ex -> String? in
-                guard let rs = ExerciseCatalog.ruleSet(for: ex.id) else { return nil }
+                guard let rs = input.customRuleSets[ex.id] ?? ExerciseCatalog.ruleSet(for: ex.id) else { return nil }
                 return rs.role(for: muscle) == .direct ? ex.id : nil
             }
         }

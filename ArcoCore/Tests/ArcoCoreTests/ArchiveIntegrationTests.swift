@@ -32,6 +32,10 @@ struct ArchiveIntegrationTests {
         ctx.insert(WeeklyGoalModel(muscleRaw: "deltoidLateral", methodRaw: "direct", target: 8, validFrom: date(2026, 11, 2)))
         ctx.insert(ExerciseModel(id: "custom_hip_thrust", name: "Hip thrust en máquina", loadTypeRaw: "machine", patternRaw: "isolationOther", originRaw: "custom", instructions: ""))
         AttendanceRepository(context: ctx, calendar: testCalendar()).markResolution(.rest, on: CivilDay(year: 2026, month: 11, day: 3))
+        let catalog = CatalogRepository(context: ctx)
+        try catalog.setProgressionRule("legs_extension", enabled: true, lower: 8, upper: 12, referenceSets: 3, increment: 5, unit: .kilograms, minimumRIR: 1)
+        try catalog.setCustomAttribution("custom_hip_thrust", [.glutes: .direct])
+        try catalog.updatePlan(WeeklyPlan.ownerDefault, effective: date(2026, 11, 2), calendar: testCalendar())
 
         let weight = BodyWeightModel(measurementDate: date(2026, 11, 2), enteredAt: date(2026, 11, 2), amount: 72, unitRaw: "kg", isEstimated: false)
         ctx.insert(weight)
@@ -95,6 +99,9 @@ struct ArchiveIntegrationTests {
         #expect(try ctxB.fetch(FetchDescriptor<BodyMeasurementModel>()).first?.sideRaw == "left")
         #expect(try ctxB.fetch(FetchDescriptor<ExerciseModel>()).contains { $0.id == "custom_hip_thrust" })
         #expect(try ctxB.fetch(FetchDescriptor<ExerciseModel>()).count == 28)
+        #expect(try ctxB.fetch(FetchDescriptor<DoubleProgressionModel>()).first?.minimumRIR == 1)
+        #expect(try ctxB.fetch(FetchDescriptor<CustomAttributionModel>()).first?.muscleRaw == "glutes")
+        #expect(try ctxB.fetch(FetchDescriptor<PlanVersionModel>()).count == 2)
     }
 
     @Test("T72: reimportar el mismo archivo no duplica registros ni fotos")

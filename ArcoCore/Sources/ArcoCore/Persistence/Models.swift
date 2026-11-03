@@ -380,3 +380,62 @@ public final class WeeklyGoalModel {
         self.sourceRaw = sourceRaw
     }
 }
+
+// MARK: - Modelos añadidos en el esquema v3 (aditivos: migración ligera desde v2)
+
+/// Regla de doble progresión elegida por el usuario para un ejercicio (spec §13). Desactivable.
+@Model
+public final class DoubleProgressionModel {
+    public var exerciseID: String
+    public var enabled: Bool
+    public var repLower: Int
+    public var repUpper: Int
+    public var referenceSets: Int
+    /// Incremento en la unidad `unitRaw`.
+    public var increment: Decimal
+    public var unitRaw: String
+    /// RIR mínimo exigido en las series de referencia (nil = sin criterio de esfuerzo).
+    public var minimumRIR: Int?
+
+    public init(exerciseID: String, enabled: Bool = true, repLower: Int, repUpper: Int, referenceSets: Int, increment: Decimal, unitRaw: String, minimumRIR: Int? = nil) {
+        self.exerciseID = exerciseID
+        self.enabled = enabled
+        self.repLower = repLower
+        self.repUpper = repUpper
+        self.referenceSets = referenceSets
+        self.increment = increment
+        self.unitRaw = unitRaw
+        self.minimumRIR = minimumRIR
+    }
+}
+
+/// Versión del plan semanal vigente desde una fecha (spec §14: "cambiar hoy los días de rutina
+/// no altera el denominador de meses anteriores"). `daysJSON` codifica [WeeklyPlan.Day].
+@Model
+public final class PlanVersionModel {
+    public var id: UUID
+    public var validFrom: Date
+    public var daysJSON: String
+
+    public init(id: UUID = UUID(), validFrom: Date, daysJSON: String) {
+        self.id = id
+        self.validFrom = validFrom
+        self.daysJSON = daysJSON
+    }
+}
+
+/// Atribución muscular corregida por el usuario para un ejercicio (spec §10.4). Se muestra como
+/// personalización, nunca como regla científica revisada.
+@Model
+public final class CustomAttributionModel {
+    public var exerciseID: String
+    public var muscleRaw: String
+    /// "direct", "indirect" o "unknown".
+    public var roleRaw: String
+
+    public init(exerciseID: String, muscleRaw: String, roleRaw: String) {
+        self.exerciseID = exerciseID
+        self.muscleRaw = muscleRaw
+        self.roleRaw = roleRaw
+    }
+}

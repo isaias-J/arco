@@ -30,8 +30,20 @@ public enum ArcoSchemaV2: VersionedSchema {
 
 /// Plan de migración explícito (spec §4: migraciones explícitas; nunca recrear la base).
 public enum ArcoMigrationPlan: SchemaMigrationPlan {
-    public static var schemas: [any VersionedSchema.Type] { [ArcoSchemaV1.self, ArcoSchemaV2.self] }
+    public static var schemas: [any VersionedSchema.Type] { [ArcoSchemaV1.self, ArcoSchemaV2.self, ArcoSchemaV3.self] }
     public static var stages: [MigrationStage] {
-        [.lightweight(fromVersion: ArcoSchemaV1.self, toVersion: ArcoSchemaV2.self)]
+        [
+            .lightweight(fromVersion: ArcoSchemaV1.self, toVersion: ArcoSchemaV2.self),
+            .lightweight(fromVersion: ArcoSchemaV2.self, toVersion: ArcoSchemaV3.self)
+        ]
+    }
+}
+
+/// Esquema v3: doble progresión, versiones del plan semanal y atribución personalizada.
+/// Cambio aditivo: migración ligera sin pérdida de datos.
+public enum ArcoSchemaV3: VersionedSchema {
+    public static let versionIdentifier = Schema.Version(3, 0, 0)
+    public static var models: [any PersistentModel.Type] {
+        ArcoSchemaV2.models + [DoubleProgressionModel.self, PlanVersionModel.self, CustomAttributionModel.self]
     }
 }
