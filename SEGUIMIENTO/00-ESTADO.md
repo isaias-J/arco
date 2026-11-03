@@ -1,3 +1,6 @@
+> Estado vigente: ver `04-PENDIENTES.md`, `03-PRUEBAS.md` y `06-REVISION-CORRECCIONES.md`.
+> Lo que sigue es el registro inicial del entorno y de la arquitectura.
+
 # Arco — Estado del proyecto
 
 Última actualización: 2026-11-02

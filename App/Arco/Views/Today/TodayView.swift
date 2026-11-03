@@ -2,6 +2,12 @@ import SwiftUI
 import SwiftData
 import ArcoCore
 
+/// Rutas de la pila de Hoy (valor explícito: evita mezclar enlaces por destino y por valor).
+enum TodayRoute: Hashable {
+    case selection
+    case session(UUID)
+}
+
 /// Pantalla Hoy (spec §8): fecha, rutina del plan para hoy, sesión activa si existe y acceso
 /// principal a empezar o reanudar. Más tranquila que el panel de progreso.
 struct TodayView: View {
@@ -10,7 +16,7 @@ struct TodayView: View {
     @Query(filter: #Predicate<WorkoutSessionModel> { $0.stateRaw == "active" }, sort: \WorkoutSessionModel.startedAt, order: .reverse)
     private var activeSessions: [WorkoutSessionModel]
     @Query private var events: [AttendanceEventModel]
-    @State private var path = NavigationPath()
+    @State private var path: [TodayRoute] = []
 
     /// Plantilla del día según la convención única de weekday (Calendar: 1 = domingo).
     private var todayTemplate: RoutineTemplateModel? {
@@ -39,7 +45,7 @@ struct TodayView: View {
                                 Label("Sesión en curso", systemImage: "play.circle.fill").font(.headline)
                                 Text("Empezada \(session.startedAt.formatted(date: .omitted, time: .shortened)) · \(session.exercises.count) ejercicios")
                                     .font(.footnote).foregroundStyle(.secondary)
-                                NavigationLink(value: session.id) {
+                                NavigationLink(value: TodayRoute.session(session.id)) {
                                     Text("Reanudar entrenamiento").frame(maxWidth: .infinity, minHeight: 44)
                                 }
                                 .buttonStyle(.borderedProminent)
@@ -55,9 +61,17 @@ struct TodayView: View {
             }
             .background(ArcoColor.background)
             .navigationTitle("Hoy")
-            .navigationDestination(for: UUID.self) { id in
-                if let session = activeSessions.first(where: { $0.id == id }) ?? fetchSession(id) {
-                    SessionView(session: session)
+            .navigationDestination(for: TodayRoute.self) { route in
+                switch route {
+                case .selection:
+                    ExerciseSelectionView(template: todayTemplate) { session in
+                        // Sustituye la selección por la sesión: volver atrás lleva a Hoy.
+                        path = [.session(session.id)]
+                    }
+                case .session(let id):
+                    if let session = activeSessions.first(where: { $0.id == id }) ?? fetchSession(id) {
+                        SessionView(session: session)
+                    }
                 }
             }
         }
@@ -90,11 +104,7 @@ struct TodayView: View {
                     Text("Hoy es un día de descanso planificado. Puedes entrenar igualmente si quieres.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
-                NavigationLink {
-                    ExerciseSelectionView(template: todayTemplate) { session in
-                        path.append(session.id)
-                    }
-                } label: {
+                NavigationLink(value: TodayRoute.selection) {
                     Label("Empezar entrenamiento", systemImage: "plus.circle.fill")
                         .frame(maxWidth: .infinity, minHeight: 44)
                 }

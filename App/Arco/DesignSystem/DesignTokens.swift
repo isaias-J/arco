@@ -65,6 +65,7 @@ struct ArcoCard<Content: View>: View {
 
     var body: some View {
         content
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(Spacing.lg)
             .background(ArcoColor.surface, in: RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
     }

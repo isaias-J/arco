@@ -1,51 +1,24 @@
 # Arco — Pendientes y próxima acción
 
-## Cambio de arquitectura importante (2026-11-02, tarde)
-La capa SwiftData (modelos, PersistenceController, WorkoutRepository) y BackupArchive se
-MOVIERON del target de app a **ArcoCore**. Motivo: los tests que instancian `ModelContainer`
-dentro del arnés de pruebas hospedado en la app lanzaban la app en el simulador y crasheaban
-(cada crash = una alerta "Arco quit unexpectedly" en el Mac del propietario).
+Última actualización: 2026-11-02, cierre de la revisión integral.
 
-Decisión definitiva:
-- Modelos + persistencia + repositorio + BackupArchive viven en ArcoCore (públicos).
-- Se eliminó el target de tests hospedado en la app (`AppTests`) del .xcodeproj.
-- Los tests de SwiftData que crean `ModelContainer` NO se ejecutan en el arnés SPM de macOS
-  (SwiftData crashea ahí). La capa SwiftData se verifica con lanzamientos CONTROLADOS de la app
-  en el simulador (arranca, siembra catálogo, renderiza). Su LÓGICA pura (idempotencia,
-  validación, asistencia) ya está cubierta por tests de ArcoCore.
-- `@Attribute(.unique)` se quitó de ExerciseModel.id (la unicidad la garantiza el seed).
-- ArcoApp usa contenedor en memoria si detecta entorno de test (guardia defensiva).
-
-## Hecho (verificado con evidencia)
-- `swift test` ArcoCore: **43 tests verdes** (dominio, analítica, ciencia, CSV, BackupArchive).
-- `xcodebuild build` app iOS: **BUILD SUCCEEDED** (simulador iPhone 17, iOS 27.2).
-- App lanzada en simulador: arranca, siembra 27 ejercicios + 7 plantillas, renderiza onboarding.
-- Servicios creados: VaultCrypto, PINAuth, BiometricAuth, VaultLock, NotificationService.
-- Bóveda de fotos (UI): captura cámara, galería, comparación, secuencia temporal, privacidad escena.
-- 5 pestañas: Hoy, Progreso, Fotos, Asistencia, Perfil + onboarding.
-
-## Pendiente (orden)
-1. Conectar NotificationService y BackupArchive a la UI (ajustes de avisos, export/restore).
-2. Calendario anual de asistencia (celdas estilo contribuciones) — §14.
-3. Medidas corporales con gráficos — §18.
-4. Gráficos por ejercicio con selección de punto, récords, e1RM en UI — §12.
-5. Edición histórica de series desde la UI — T05, T06.
-6. Estados vacíos/error exhaustivos (§21) y repaso de accesibilidad (VoiceOver, Dynamic Type) — T74.
-7. README de entrega: entorno, compilación, instalación en iPhone, limitaciones de firma.
+## Estado verificado
+- `cd ArcoCore && swift test`: 86 pruebas en verde.
+- XCUITest en el simulador aislado "Arco-QA": 7 recorridos en verde.
+- Build de la app sin errores.
+- Repositorio público actualizado; `scripts/preflight-publico.sh` sin hallazgos.
+- El ajuste del Mac `com.apple.CrashReporter DialogType` se restauró a su valor por defecto.
 
 ## Próxima acción concreta
-Conectar los ajustes de notificaciones y la exportación/restauración de archivo cifrado a la UI
-de Perfil (los servicios ya existen y están probados en su lógica).
+Instalar en el iPhone 14 (README §4) y recorrer la lista del README §7. Anotar cada resultado
+en `03-PRUEBAS.md` cambiando el estado a "probado en iPhone real".
 
-## Verificación — comandos
-```
-cd ArcoCore && swift test          # 43 tests, sin simulador
-export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
-xcodebuild -project Arco.xcodeproj -scheme Arco \
-  -destination 'platform=iOS Simulator,name=iPhone 17' build
-```
-NO ejecutar un target de tests hospedado en la app (se eliminó; crasheaba el simulador).
+## Pendiente de desarrollo
+1. Historial de versiones del plan semanal (T39).
+2. Interfaz para recalcular con otra versión de atribución (T18) cuando exista una v1.1.
+3. Ilustraciones propias de cada pose.
+4. Exportación con muchas fotos fuera del hilo principal con progreso.
+5. Pruebas automáticas de `PhotoVaultOperations` (vínculo foto-peso y borrado).
 
 ## Bloqueos
-- Firma para iPhone real: requiere Apple ID del propietario en Xcode (manual). No bloquea desarrollo.
-- Tests de cámara/Face ID/Keychain real: solo verificables en iPhone físico.
+- Firma para el iPhone: requiere tu Apple ID en Xcode.

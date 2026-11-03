@@ -85,6 +85,7 @@ struct ExerciseSelectionView: View {
             }
             Section {
                 Button { showPicker = true } label: { Label("Buscar en todo el catálogo", systemImage: "magnifyingglass") }
+                    .accessibilityIdentifier("selection.search")
             }
         }
         .environment(\.editMode, .constant(selected.isEmpty ? .inactive : .active))
@@ -174,7 +175,6 @@ struct ExerciseSelectionView: View {
         )
         onStart(session)
         Task { await appState.refreshReminders() }
-        dismiss()
     }
 }
 

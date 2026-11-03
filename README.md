@@ -1,142 +1,86 @@
 # Arco
 
 App nativa de iPhone para registrar entrenamiento de hipertrofia, observar el progreso y
-mantener la constancia. Privada y local: tus datos y fotos se guardan solo en tu dispositivo.
+mantener la constancia. Privada y local: los datos y las fotos se guardan solo en el dispositivo.
 
-El nombre "Arco" es provisional y configurable dentro de la app.
+## 1. Entorno usado
+- Xcode 27.2, SDK iOS 27.2, objetivo de despliegue iOS 18.0 (compatible con iPhone 14).
+- Swift 6 (modo de lenguaje 6, seguridad de concurrencia estricta).
+- En esta máquina `xcode-select` apunta a Command Line Tools: por línea de comandos se antepone
+  `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`. Desde Xcode.app no hace falta.
 
----
-
-## 1. Entorno real usado
-
-- **Xcode 27.2** (build 27B52).
-- **SDK iOS 27.2**; objetivo de despliegue **iOS 18.0** (compatible con iPhone 14).
-- **Swift 6.4.2**, modo de lenguaje Swift 6 con seguridad de datos estricta.
-- Simuladores usados para verificación: iPhone 17 (iOS 27.2).
-
-> Nota: en esta máquina `xcode-select` apunta a las Command Line Tools. Para compilar por
-> línea de comandos se antepone `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`.
-> Abriendo el proyecto en Xcode.app directamente NO hace falta.
-
-## 2. Estructura del proyecto
-
+## 2. Estructura
 ```
-arco/
-├── Arco.xcodeproj           ← proyecto de app (abrir este en Xcode)
-├── App/Arco/                ← target de app (SwiftUI, servicios del sistema, vistas)
-│   ├── ArcoApp.swift        ← punto de entrada; crea el contenedor SwiftData
-│   ├── AppState.swift       ← estado global (@Observable @MainActor)
-│   ├── DesignSystem/        ← tokens de color/espaciado, tarjetas
-│   ├── Services/            ← cámara, notificaciones, cifrado, PIN, Face ID, bloqueo bóveda
-│   ├── Views/               ← Hoy, Progreso, Fotos, Asistencia, Perfil, onboarding
-│   ├── Assets.xcassets/     ← colores, icono de app
-│   └── Info.plist           ← permisos (cámara, Face ID)
-├── ArcoCore/                ← Swift Package: lógica pura + persistencia (probable por CLI)
-│   └── Sources/ArcoCore/
-│       ├── Domain/          ← unidades, series, IMC, peso, asistencia, parser decimal
-│       ├── Science/         ← catálogo (27 ejercicios), músculos, atribuciones, sugerencias
-│       ├── Analytics/       ← conteo muscular, récords, e1RM, CSV, gráficos
-│       └── Persistence/     ← modelos SwiftData, repositorio, archivo de respaldo
-│   └── Tests/ArcoCoreTests/ ← 43 pruebas de reglas de negocio
-├── SEGUIMIENTO/             ← documentación de requisitos, decisiones, pruebas, pendientes
-└── ARCO_PAQUETE_PARA_CLAUDE/← especificación original (prompt maestro) y referencias
+Arco.xcodeproj          proyecto (abrir este)
+App/Arco/               app SwiftUI: vistas, servicios del sistema (cámara, avisos, Face ID, cifrado)
+ArcoCore/               paquete Swift: dominio, ciencia, analítica, modelos SwiftData, repositorios,
+                        copia cifrada portable, planificador de avisos
+ArcoCore/Tests/         86 pruebas (lógica e integración con SwiftData real)
+AppUITests/             7 recorridos de interfaz (XCUITest)
+SEGUIMIENTO/            requisitos, decisiones, matriz de pruebas, pendientes, seguridad
+scripts/preflight-publico.sh   revisión de seguridad antes de cada push
 ```
 
-**Decisión de arquitectura:** la lógica de negocio y la capa de persistencia (modelos
-SwiftData, repositorio) viven en el paquete `ArcoCore` para poder probarlas con `swift test`
-sin lanzar la app. El target de app contiene la presentación SwiftUI y los servicios que tocan
-el sistema (cámara, notificaciones, LocalAuthentication, Keychain, cifrado de ficheros).
-
-## 3. Cómo compilar y probar
-
-### Pruebas de reglas de negocio (rápidas, sin simulador)
+## 3. Compilar y probar
 ```bash
-cd ArcoCore && swift test
-```
-Resultado esperado: **43 tests en 9 suites, todos en verde**. Cubren unidades y conversión
-exacta, conteo muscular D/I/F/U, IMC, récords, doble progresión, e1RM, sugerencias, CSV y el
-archivo de respaldo cifrado.
+cd ArcoCore && swift test                         # 86 pruebas, sin simulador
 
-### Compilar la app para el simulador
-```bash
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 xcodebuild -project Arco.xcodeproj -scheme Arco \
   -destination 'platform=iOS Simulator,name=iPhone 17' build
+
+# Recorridos de interfaz en un simulador aislado (borra los datos DE ESE simulador al empezar):
+xcrun simctl create "Arco-QA" com.apple.CoreSimulator.SimDeviceType.iPhone-17 com.apple.CoreSimulator.SimRuntime.iOS-27-2
+xcodebuild -project Arco.xcodeproj -scheme Arco -destination 'platform=iOS Simulator,name=Arco-QA' test
 ```
-Resultado esperado: **BUILD SUCCEEDED**.
+Los recorridos de interfaz arrancan la app con `-arco-uitest-reset`, que borra la base, el PIN y
+la bóveda **del simulador donde se ejecutan**. No los ejecutes en un dispositivo con datos reales.
 
-### Ejecutar en el simulador
-Abre `Arco.xcodeproj` en Xcode, elige un simulador iPhone y pulsa Run (⌘R). O desde la línea
-de comandos instala el `.app` generado con `xcrun simctl install` y `launch`.
+## 4. Instalar en el iPhone
+1. Abre `Arco.xcodeproj` en Xcode → target **Arco** → **Signing & Capabilities**.
+2. En **Team** elige tu Apple ID (Xcode → Settings → Accounts si no aparece). Si hay conflicto,
+   cambia el Bundle Identifier `com.arco.app` por uno propio.
+3. Conecta el iPhone, selecciónalo como destino y pulsa Run.
+4. En el iPhone: Ajustes → General → VPN y gestión de dispositivos → confía en tu certificado.
+Con una cuenta gratuita la instalación caduca a los 7 días.
 
-> Importante: NO hay un target de pruebas hospedado en la app. Las pruebas de SwiftData se
-> ejecutan como lógica en `ArcoCore` (`swift test`), no lanzando la app.
+## 5. Almacenamiento, privacidad y copias
+- Todo es local: sin iCloud, CloudKit, servidores ni analítica. La base SwiftData y sus archivos
+  auxiliares se marcan excluidos de la copia automática en cada arranque (comprobado en pruebas
+  sobre macOS; pendiente de comprobar en el iPhone).
+- Fotos: cifradas con AES-GCM y una clave aleatoria en el Keychain de este dispositivo
+  (`WhenUnlockedThisDeviceOnly`, no sincronizable), fuera de Apple Fotos. PIN de 4 dígitos y
+  Face ID opcional. El PIN no es la clave de cifrado: restablecerlo no borra fotos.
+- **Copia cifrada** (Perfil → Copia de seguridad): contraseña propia de 8+ caracteres. Incluye
+  sesiones y series, ejercicios personalizados, rutina, perfil, ajustes, pesos, alturas, medidas,
+  asistencia, descansos, recordatorios y metas; **las fotos solo si la bóveda está desbloqueada y
+  marcas la opción** (la pantalla indica "Fotos: sí/no"). Restaurar valida todo el archivo antes
+  de cambiar nada, no duplica lo existente y vuelve a cifrar las fotos con la clave del nuevo
+  dispositivo. También puedes restaurar desde la primera pantalla de configuración.
+- Si pierdes el iPhone sin una copia exportada, los datos y fotos no se pueden recuperar.
 
-## 4. Instalar en tu iPhone (firma)
+## 6. Qué está verificado
+Detalle por criterio en `SEGUIMIENTO/03-PRUEBAS.md`.
+- **Con datos simulados (86 pruebas):** conteo muscular y pares unilaterales, atribuciones,
+  récords, gráficas sin asistencia, peso e IMC, asistencia y descansos, días de la rutina,
+  planificador de avisos (cancelación, aplazamiento, horarios por día, fechas límite), registro
+  de series con fallo de guardado, persistencia en disco, migración del esquema, exclusión de
+  copias de la base, y copia cifrada completa con fotos restaurada en una instalación limpia
+  con otra clave, con contraseña incorrecta, archivo dañado y reimportación.
+- **En el simulador aislado (7 recorridos):** primera apertura sin datos de demostración;
+  registrar una serie, cerrar la app y recuperarla; asistencia creada por la serie; "Hoy
+  descansé" persistente; validación de peso; PIN de la bóveda; pantalla de copia honesta sobre
+  las fotos; tema oscuro con texto grande.
 
-La instalación en un iPhone real requiere **tu** cuenta de Apple (firma de código). No se puede
-automatizar desde aquí sin tus credenciales. Pasos:
+## 7. Pendiente de comprobar en tu iPhone
+Cámara y fotos guardadas en la bóveda; varias poses con un solo pesaje; Face ID (éxito, cancelar,
+fallo); "Olvidé mi PIN" con el código del dispositivo; que el selector de apps no muestre fotos;
+entrega real de avisos y sus botones "Sí fui", "Hoy descansé" y "Voy más tarde"; exportar la copia
+a Archivos y restaurarla tras reinstalar; borrado de fotos; rendimiento con cientos de fotos;
+VoiceOver; modo avión.
 
-1. Abre `Arco.xcodeproj` en Xcode.
-2. Selecciona el target **Arco** → pestaña **Signing & Capabilities**.
-3. En **Team**, elige tu Apple ID (añádelo con Xcode → Settings → Accounts si no aparece).
-4. Xcode generará un perfil de aprovisionamiento personal automático. Puede que debas cambiar el
-   **Bundle Identifier** (`com.arco.app`) por uno único tuyo si hay conflicto.
-5. Conecta tu iPhone 14, selecciónalo como destino y pulsa Run.
-6. La primera vez, en el iPhone: Ajustes → General → VPN y gestión de dispositivos → confía en
-   tu certificado de desarrollador.
-
-Con una cuenta gratuita, la app caduca a los 7 días y debe reinstalarse; con el Apple Developer
-Program dura un año.
-
-## 5. Política de almacenamiento y recuperación
-
-- **Todo es local.** Sin iCloud, CloudKit, servidores, cuentas ni analítica externa. La base de
-  datos SwiftData se marca excluida de la copia automática de iCloud.
-- **Fotos privadas (bóveda):** se guardan **cifradas** (AES-GCM, clave de 256 bits en Keychain
-  con protección "solo este dispositivo, desbloqueado") en el contenedor privado de la app,
-  fuera de Apple Fotos. Nunca se escriben en el álbum Ocultos ni en la fototeca.
-- **PIN de 4 dígitos + Face ID opcional** protegen el acceso a las fotos. El PIN se guarda como
-  verificador derivado con sal (no en texto plano); la clave de cifrado de las fotos NO se
-  deriva del PIN.
-- **Copia de seguridad:** puedes exportar un **archivo cifrado** con contraseña propia (separada
-  del PIN) desde Perfil → Copia de seguridad. La restauración valida contraseña e integridad
-  **antes** de tocar tus datos y no duplica registros existentes. También puedes exportar un
-  **CSV** de tus series.
-- Una copia local no sustituye a un respaldo si pierdes el teléfono: exporta el archivo cifrado
-  y guárdalo donde elijas.
-
-## 6. Qué está verificado y qué queda pendiente de tu iPhone
-
-Ver `SEGUIMIENTO/03-PRUEBAS.md` para el detalle por criterio (T01–T76).
-
-**Verificado por pruebas automáticas (`swift test`, 43 tests):** reglas de unidades y conversión
-(T23, T24), conteo muscular y atribuciones (T09–T17), récords/progresión/e1RM (T26–T30), IMC
-(T55–T57), peso y asistencia (T34–T39, T52, T53), CSV seguro (T69) y archivo cifrado (T70).
-
-**Verificado compilando y ejecutando en simulador:** la app compila sin errores ni warnings,
-arranca, siembra el catálogo (27 ejercicios) y las plantillas semanales, y renderiza el
-onboarding y la navegación de 5 pestañas.
-
-**Pendiente de comprobar en tu iPhone 14 real (no verificable en simulador):**
-- Captura de cámara real y que la foto queda cifrada fuera de Apple Fotos (T47, T48).
-- Face ID real y que la bóveda permanece bloqueada si se cancela (T61, T62).
-- Que al pasar a segundo plano el selector de apps no expone la foto (T63).
-- Entrega real de notificaciones locales y acciones de la revisión de asistencia (T40–T44).
-- Rendimiento de la galería con cientos de fotos y varios años de datos.
-
-No se declara superado ningún criterio marcado como pendiente: requiere tu dispositivo.
-
-## 7. Decisiones de producto incorporadas (de la especificación)
-
-- Registro rápido por serie con confirmación en un toque y persistencia inmediata.
-- **Sin temporizador de descanso** (el temporizador de la cámara sí existe).
-- Catálogo flexible; las plantillas definen grupos del día, no ejercicios fijos.
-- Sugerencias de énfasis muscular **explicables** y deterministas, basadas en tu registro.
-- RIR opcional; conteo directo/indirecto/fraccional con el modelo etiquetado como estimación.
-- IMC con marco adulto NHS/NICE (18+), identificado y sin diagnóstico.
-- Datos personales desconocidos (fecha de nacimiento, altura, peso, metas) se configuran en la
-  app; no se inventan.
-
-Las fuentes científicas y las reglas de atribución muscular están documentadas en
-`SEGUIMIENTO/05-FUENTES.md`.
+## 8. Limitaciones conocidas
+- No se guardan versiones de la rutina: cambiarla altera el cumplimiento de las últimas 4 semanas.
+- Las poses usan símbolos genéricos, no ilustraciones propias.
+- Los avisos se programan para 4 semanas; sin abrir la app en ese tiempo, se detienen.
+- Exportar con muchas fotos se hace en primer plano y puede tardar.

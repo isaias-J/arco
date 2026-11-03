@@ -19,6 +19,11 @@
 			path = "App/Arco";
 			sourceTree = "<group>";
 		};
+		B0000011 /* AppUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = AppUITests;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -40,6 +45,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		B0000020 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -47,6 +59,7 @@
 			isa = PBXGroup;
 			children = (
 				A0000011 /* Arco */,
+				B0000011 /* AppUITests */,
 				A0000050 /* ArcoCore */,
 				A0000040 /* Products */,
 			);
@@ -56,6 +69,7 @@
 			isa = PBXGroup;
 			children = (
 				A0000041 /* Arco.app */,
+				B0000041 /* ArcoUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -70,6 +84,7 @@
 
 /* Begin PBXFileReference section */
 		A0000041 /* Arco.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Arco.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		B0000041 /* ArcoUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ArcoUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXNativeTarget section */
@@ -96,6 +111,27 @@
 			productReference = A0000041 /* Arco.app */;
 			productType = "com.apple.product-type.application";
 		};
+		B0000060 /* ArcoUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B0000070 /* Build configuration list for PBXNativeTarget "ArcoUITests" */;
+			buildPhases = (
+				B0000061 /* Sources */,
+				B0000020 /* Frameworks */,
+				B0000062 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				B0000065 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				B0000011 /* AppUITests */,
+			);
+			name = ArcoUITests;
+			productName = ArcoUITests;
+			productReference = B0000041 /* ArcoUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -108,6 +144,10 @@
 				TargetAttributes = {
 					A0000060 = {
 						CreatedOnToolsVersion = 27.2;
+					};
+					B0000060 = {
+						CreatedOnToolsVersion = 27.2;
+						TestTargetID = A0000060;
 					};
 				};
 			};
@@ -130,12 +170,20 @@
 			projectRoot = "";
 			targets = (
 				A0000060 /* Arco */,
+				B0000060 /* ArcoUITests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		A0000062 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B0000062 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -152,7 +200,32 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		B0000061 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		B0000065 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A0000060 /* Arco */;
+			targetProxy = B0000066 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin PBXContainerItemProxy section */
+		B0000066 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A0000002 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A0000060;
+			remoteInfo = Arco;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin XCBuildConfiguration section */
 		A0000004 /* Debug */ = {
@@ -238,6 +311,34 @@
 			};
 			name = Release;
 		};
+		B0000071 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.arco.app.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Arco;
+			};
+			name = Debug;
+		};
+		B0000072 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.arco.app.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Arco;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -255,6 +356,15 @@
 			buildConfigurations = (
 				A0000071 /* Debug */,
 				A0000072 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B0000070 /* Build configuration list for PBXNativeTarget "ArcoUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B0000071 /* Debug */,
+				B0000072 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

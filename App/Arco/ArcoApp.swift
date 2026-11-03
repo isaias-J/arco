@@ -21,6 +21,12 @@ struct ArcoApp: App {
             for suffix in ["", "-wal", "-shm"] {
                 try? FileManager.default.removeItem(atPath: url.path + suffix)
             }
+            // Instalación limpia de pruebas: sin PIN, sin intentos fallidos, sin fotos ni preferencias.
+            PINAuth().reset()
+            try? FileManager.default.removeItem(at: URL.applicationSupportDirectory.appending(path: "Vault"))
+            for key in [Preferences.rirModeKey, Preferences.useFaceIDKey, Preferences.reviewOnboardedKey] {
+                UserDefaults.standard.removeObject(forKey: key)
+            }
         }
         do {
             let container = try PersistenceController.makeContainer()
