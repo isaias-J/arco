@@ -63,6 +63,15 @@ struct AttendanceView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: Spacing.lg) {
+                    VStack(alignment: .leading, spacing: Spacing.xs) {
+                        ArcoEyebrow(title: "Cada día cuenta")
+                        Text("Tu constancia")
+                            .font(.system(.largeTitle, design: .rounded, weight: .semibold))
+                        Text("Tus entrenamientos, a lo largo del tiempo.")
+                            .font(.subheadline).foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, Spacing.sm)
                     summaryCard
                     todayCard
                     calendarCard
@@ -70,7 +79,7 @@ struct AttendanceView: View {
                 }
                 .padding(Spacing.lg)
             }
-            .background(ArcoColor.background)
+            .background(ArcoBackdrop())
             .navigationTitle("Asistencia")
         }
     }

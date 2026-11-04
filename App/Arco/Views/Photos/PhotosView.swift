@@ -21,7 +21,7 @@ struct PhotosView: View {
                 NavigationStack {
                     VaultLockedView()
                         .navigationTitle("Fotos")
-                        .background(ArcoColor.background)
+                        .background(ArcoBackdrop())
                 }
             }
         }
@@ -53,11 +53,18 @@ struct VaultLockedView: View {
         ScrollView {
             VStack(spacing: Spacing.xl) {
                 Image(systemName: "lock.shield")
-                    .font(.system(size: 56))
-                    .foregroundStyle(ArcoColor.brand)
+                    .font(.system(size: 46, weight: .light))
+                    .foregroundStyle(ArcoColor.brandText)
+                    .frame(width: 112, height: 112)
+                    .background(ArcoColor.brand.opacity(0.12), in: RoundedRectangle(cornerRadius: 32))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 32)
+                            .strokeBorder(ArcoColor.brand.opacity(0.25), lineWidth: 1)
+                    }
                     .accessibilityHidden(true)
+                ArcoEyebrow(title: "Solo para ti")
                 Text("Bóveda privada")
-                    .font(.title2.bold())
+                    .font(.system(.title, design: .rounded, weight: .semibold))
                 Text("Tus fotos se guardan cifradas en este dispositivo, fuera de Apple Fotos. Desbloquea para verlas.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)

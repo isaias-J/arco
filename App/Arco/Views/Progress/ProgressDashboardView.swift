@@ -10,6 +10,16 @@ struct ProgressDashboardView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: Spacing.lg) {
+                    VStack(alignment: .leading, spacing: Spacing.xs) {
+                        ArcoEyebrow(title: "Hecho por ti, serie a serie")
+                        Text("Tu progreso")
+                            .font(.system(.largeTitle, design: .rounded, weight: .semibold))
+                        Text("Una mirada clara a tu entrenamiento.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, Spacing.sm)
                     WeeklySummaryCard()
                     MuscleWeeklyCountCard(sessions: sessions)
                     MuscleHistoryLinkCard()
@@ -30,7 +40,7 @@ struct ProgressDashboardView: View {
                 }
                 .padding(Spacing.lg)
             }
-            .background(ArcoColor.background)
+            .background(ArcoBackdrop())
             .navigationTitle("Progreso")
         }
     }

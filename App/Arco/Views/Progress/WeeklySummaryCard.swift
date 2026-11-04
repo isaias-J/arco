@@ -72,8 +72,17 @@ struct WeeklySummaryCompactCard: View {
 
     var body: some View {
         ArcoCard {
-            VStack(alignment: .leading, spacing: Spacing.xs) {
-                Text("Esta semana").font(.headline)
+            VStack(alignment: .leading, spacing: Spacing.md) {
+                HStack {
+                    VStack(alignment: .leading, spacing: Spacing.xs) {
+                        ArcoEyebrow(title: "Tu constancia")
+                        Text("Esta semana").font(.title3.weight(.semibold))
+                    }
+                    Spacer()
+                    Image(systemName: "chart.bar.fill")
+                        .foregroundStyle(ArcoColor.chartSecondary)
+                        .accessibilityHidden(true)
+                }
                 if let summary = WeeklySummaryBuilder.summary(weekOffset: 0, sessions: sessions, appState: appState) {
                     ForEach(Array(summary.messages.filter { !$0.hasPrefix("Racha") }.prefix(2).enumerated()), id: \.offset) { _, message in
                         Text(message).font(.subheadline).monospacedDigit()

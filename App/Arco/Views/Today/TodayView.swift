@@ -51,7 +51,7 @@ struct TodayView: View {
                 }
                 .padding(Spacing.lg)
             }
-            .background(ArcoColor.background)
+            .background(ArcoBackdrop())
             .navigationTitle("Hoy")
             .toolbar {
                 ToolbarItemGroup(placement: .topBarTrailing) {
@@ -93,26 +93,47 @@ struct TodayView: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: Spacing.xs) {
+        VStack(alignment: .leading, spacing: Spacing.sm) {
+            ArcoEyebrow(title: "Tu espacio de entrenamiento")
             Text(Date().formatted(.dateTime.weekday(.wide).day().month(.wide)))
-                .font(.title2.bold())
+                .font(.title3.weight(.medium))
+                .foregroundStyle(.secondary)
             if let t = todayTemplate {
                 Text(t.isRestDay ? "Descanso planificado" : t.name)
-                    .foregroundStyle(.secondary)
+                    .font(.system(.largeTitle, design: .rounded, weight: .semibold))
                     .accessibilityIdentifier("today.routine")
             } else {
-                Text("Sin rutina para hoy").foregroundStyle(.secondary)
+                Text("Sin rutina para hoy")
+                    .font(.system(.largeTitle, design: .rounded, weight: .semibold))
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, Spacing.sm)
     }
 
     private var planCard: some View {
         ArcoCard {
-            VStack(alignment: .leading, spacing: Spacing.md) {
+            VStack(alignment: .leading, spacing: Spacing.lg) {
+                HStack(alignment: .top, spacing: Spacing.md) {
+                    Image(systemName: todayTemplate?.isRestDay == true ? "moon.stars.fill" : "figure.strengthtraining.traditional")
+                        .font(.title3.weight(.medium))
+                        .foregroundStyle(ArcoColor.brandText)
+                        .frame(width: 48, height: 48)
+                        .background(ArcoColor.brand.opacity(0.12), in: RoundedRectangle(cornerRadius: 15))
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: Spacing.xs) {
+                        ArcoEyebrow(title: "Tu próximo paso")
+                        Text(todayTemplate?.isRestDay == true ? "Día de descanso" : "Haz espacio para progresar")
+                            .font(.title3.weight(.semibold))
+                    }
+                    Spacer(minLength: 0)
+                }
                 if let t = todayTemplate, t.isRestDay {
                     Text("Hoy es un día de descanso planificado. Puedes entrenar igualmente si quieres.")
                         .font(.footnote).foregroundStyle(.secondary)
+                } else {
+                    Text("Registra tus series a tu ritmo y sigue tu evolución.")
+                        .font(.subheadline).foregroundStyle(.secondary)
                 }
                 NavigationLink(value: TodayRoute.selection) {
                     Label("Empezar entrenamiento", systemImage: "plus.circle.fill")

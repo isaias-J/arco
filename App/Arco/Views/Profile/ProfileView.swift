@@ -61,6 +61,8 @@ struct ProfileView: View {
                 linksSection
                 aboutSection
             }
+            .scrollContentBackground(.hidden)
+            .background(ArcoBackdrop())
             .navigationTitle("Perfil")
             .sheet(isPresented: $showAddWeight) {
                 WeightEditorView()
